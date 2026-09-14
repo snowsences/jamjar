@@ -129,7 +129,7 @@ window.JamjarFirebase = {
   signOut: () => signOut(auth),
   addItem: (input) =>
     commit((batch) => {
-      const id = input.id || crypto.randomUUID(),
+      const id = crypto.randomUUID(),
         now = Date.now(),
         item = {
           ...input,
@@ -138,7 +138,6 @@ window.JamjarFirebase = {
           completed: false,
           createdAt: now,
           updatedAt: now,
-          listAddedAt: now,
         };
       batch.set(doc(itemsRef, id), item);
       record(batch, "added", item);
@@ -166,7 +165,6 @@ window.JamjarFirebase = {
         ...item,
         completed: !item.completed,
         updatedAt: Date.now(),
-        ...(!item.completed ? {} : { listAddedAt: Date.now() }),
       };
       batch.set(doc(itemsRef, item.id), next);
       record(batch, next.completed ? "bought" : "restored", item);
@@ -178,7 +176,6 @@ window.JamjarFirebase = {
         list: toList,
         completed: false,
         quantity: "",
-        listAddedAt: Date.now(),
         updatedAt: Date.now(),
       };
       batch.set(doc(itemsRef, item.id), next);
