@@ -197,7 +197,11 @@ function renderHistory() {
 }
 function row(x, i, n) {
   const colors = rowColors(x.list, i, n);
-  return `<li class="swipe-wrap${x.completed ? " is-done" : ""}" data-id="${e(x.id)}"><div class="swipe-underlay${x.list === "pantry" ? " from-right" : ""}"><span class="under-icon">${I(x.list === "grocery" ? "check" : "basket")}</span><span class="under-label">${x.list === "grocery" ? (x.completed ? "Restore" : "Bought") : "Move to Grocery"}</span></div><button class="item-row" aria-label="Edit ${e(x.description)}" style="--band-top:${colors.top};--band-bottom:${colors.bottom}"><span class="item-copy"><span data-text="${e(x.description)}">${e(x.description)}</span>${x.list === "grocery" && x.quantity ? `<small>${e(x.quantity)}</small>` : ""}</span></button></li>`;
+  const actions =
+    x.list === "grocery"
+      ? `<div class="swipe-underlay primary"><span class="under-icon">${I("check")}</span><span class="under-label">${x.completed ? "Restore" : "Bought"}</span></div><div class="swipe-underlay delete"><span>${I("trash")} Delete</span></div>`
+      : `<div class="swipe-underlay move from-right"><span class="under-icon">${I("basket")}</span><span class="under-label">Move to Grocery</span></div>`;
+  return `<li class="swipe-wrap${x.completed ? " is-done" : ""}" data-id="${e(x.id)}">${actions}<button class="item-row" aria-label="Edit ${e(x.description)}" style="--band-top:${colors.top};--band-bottom:${colors.bottom}"><span class="item-copy"><span data-text="${e(x.description)}">${e(x.description)}</span>${x.list === "grocery" && x.quantity ? `<small>${e(x.quantity)}</small>` : ""}</span></button></li>`;
 }
 function editor() {
   if (!s.editor) return "";
@@ -296,7 +300,7 @@ function close(fromPop = false) {
   s.editId = null;
   s.error = "";
   if (!fromPop && window.history.state?.editor) window.history.back();
-  else render();
+  render();
 }
 async function save() {
   const desc = s.desc.trim(),
@@ -390,7 +394,7 @@ async function remove() {
   s.editor = false;
   s.editId = null;
   if (window.history.state?.editor) window.history.back();
-  else render();
+  render();
 }
 async function clearAll() {
   const list = done();
@@ -402,9 +406,9 @@ async function clearAll() {
 function swipes() {
   document.querySelectorAll(".swipe-wrap").forEach((w) => {
     const b = w.querySelector(".item-row"),
-      u = w.querySelector(".swipe-underlay"),
-      l = w.querySelector(".under-label"),
-      ii = w.querySelector(".under-icon"),
+      primary = w.querySelector(".swipe-underlay.primary, .swipe-underlay.move"),
+      l = primary?.querySelector(".under-label"),
+      ii = primary?.querySelector(".under-icon"),
       x = s.items.find((v) => v.id === w.dataset.id);
     let start = 0,
       startY = 0,
@@ -427,8 +431,8 @@ function swipes() {
       if (!b.hasPointerCapture(q.pointerId) || vertical) return;
       const raw = q.clientX - start,
         y = q.clientY - startY,
-        dir = x.list === "grocery" ? 1 : -1,
-        next = raw * dir > 0 ? raw : raw * 0.08;
+        next =
+          x.list === "grocery" ? raw : raw < 0 ? raw : raw * 0.08;
       if (!horizontal && Math.abs(y) > 8 && Math.abs(y) > Math.abs(raw)) {
         vertical = true;
         drag = true;
@@ -451,39 +455,49 @@ function swipes() {
         x.list === "pantry" && next < -12,
       );
       const transfer =
-        x.list === "grocery" && Math.abs(next) >= innerWidth * 0.5;
-      u.classList.toggle("is-transfer", transfer);
-      l.textContent = transfer
-        ? x.list === "grocery"
+        x.list === "grocery" && next >= innerWidth * 0.5;
+      primary?.classList.toggle("is-transfer", transfer);
+      if (l)
+        l.textContent = transfer
           ? "Move to Pantry"
-          : "Move to Grocery"
-        : x.list === "grocery"
+          : x.list === "grocery"
           ? x.completed
             ? "Restore"
             : "Bought"
           : "Move to Grocery";
-      ii.innerHTML = I(
-        transfer ? "archive" : x.list === "grocery" ? "check" : "basket",
-      );
+      if (ii)
+        ii.innerHTML = I(
+          transfer ? "archive" : x.list === "grocery" ? "check" : "basket",
+        );
     };
     b.onpointerup = (q) => {
       if (b.hasPointerCapture(q.pointerId))
         b.releasePointerCapture(q.pointerId);
-      const d = Math.abs(last);
       b.classList.remove("dragging");
       w.classList.remove("swiping-right", "swiping-left");
-      if (x.list === "grocery" && d >= innerWidth * 0.5) {
+      if (x.list === "grocery" && last >= innerWidth * 0.5) {
         b.classList.add("completing");
         navigator.vibrate?.(12);
         return setTimeout(() => move(x, "pantry"), 180);
       }
-      if (d >= 64) {
-        b.classList.add(x.list === "grocery" ? "completing" : "moving-left");
+      if (x.list === "grocery" && last >= 64) {
+        b.classList.add("completing");
         navigator.vibrate?.(12);
-        return setTimeout(
-          () => (x.list === "grocery" ? toggle(x) : move(x, "grocery")),
-          180,
-        );
+        return setTimeout(() => toggle(x), 180);
+      }
+      if (x.list === "grocery" && last <= -64) {
+        b.classList.add("moving-left");
+        navigator.vibrate?.(12);
+        return setTimeout(() => {
+          s.editId = x.id;
+          s.del = true;
+          render();
+        }, 180);
+      }
+      if (x.list === "pantry" && last <= -64) {
+        b.classList.add("moving-left");
+        navigator.vibrate?.(12);
+        return setTimeout(() => move(x, "grocery"), 180);
       }
       b.style.transform = "";
     };
@@ -508,9 +522,11 @@ function pullToClear() {
     tracking = false;
   const atBottom = () =>
     innerHeight + scrollY >= document.documentElement.scrollHeight - 4;
-  const nearListEnd = (y) => {
-    const bottom = section.getBoundingClientRect().bottom;
-    return y >= Math.min(innerHeight - 150, bottom - 120);
+  const inPullArea = (y) => {
+    const listBottom = section
+      .querySelector(".item-list")
+      .getBoundingClientRect().bottom;
+    return y >= listBottom - 4 || y >= innerHeight - 150;
   };
   const show = (value) => {
     amount = Math.max(0, Math.min(value, 96));
@@ -535,7 +551,7 @@ function pullToClear() {
     "touchstart",
     (event) => {
       const touch = event.touches[0];
-      if (!touch || !atBottom() || !nearListEnd(touch.clientY)) return;
+      if (!touch || !atBottom() || !inPullArea(touch.clientY)) return;
       startX = touch.clientX;
       startY = touch.clientY;
       amount = 0;
@@ -562,7 +578,7 @@ function pullToClear() {
     if (
       event.pointerType !== "mouse" ||
       !atBottom() ||
-      !nearListEnd(event.clientY)
+      !inPullArea(event.clientY)
     )
       return;
     startX = event.clientX;

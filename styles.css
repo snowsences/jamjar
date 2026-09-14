@@ -247,7 +247,7 @@ strong {
 }
 .swipe-wrap {
   position: relative;
-  min-height: 0;
+  min-height: 64px;
   overflow: hidden;
   background: #304e5b;
   isolation: isolate;
@@ -279,8 +279,19 @@ strong {
   justify-content: flex-end;
   background: #f9732f;
 }
-.swipe-wrap.swiping-right .swipe-underlay,
-.swipe-wrap.swiping-left .swipe-underlay {
+.swipe-underlay.delete {
+  justify-content: flex-end;
+  padding-right: 26px;
+  background: #a94453;
+}
+.swipe-underlay.delete > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.swipe-wrap.swiping-right .swipe-underlay.primary,
+.swipe-wrap.swiping-left .swipe-underlay.delete,
+.swipe-wrap.swiping-left .swipe-underlay.move {
   opacity: 1;
 }
 .swipe-underlay .icon {
@@ -291,7 +302,7 @@ strong {
   position: relative;
   z-index: 1;
   width: 100%;
-  min-height: 0;
+  min-height: 64px;
   display: flex;
   align-items: center;
   text-align: left;
@@ -725,18 +736,30 @@ strong {
   border-radius: 8px;
   padding: 0 13px;
 }
+#desc {
+  appearance: none;
+  background-image: none !important;
+}
+#desc::-webkit-calendar-picker-indicator {
+  display: none !important;
+  opacity: 0;
+}
 .form-error {
   color: #ffbdc6;
   font-size: 15px;
 }
 .dialog-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
   justify-content: flex-end;
 }
 .dialog-actions .delete-button {
-  margin-right: auto;
+  flex: 0 0 100%;
+  width: 100%;
+  margin-right: 0;
+  justify-content: center;
   color: #ffbdc6;
 }
 .close-x {
@@ -828,7 +851,8 @@ strong {
   }
   .dialog-backdrop.editor .delete-button {
     grid-column: 1/-1;
-    justify-self: start;
+    width: 100%;
+    justify-self: stretch;
   }
   .screen-head {
     height: calc(72px + env(safe-area-inset-top));
