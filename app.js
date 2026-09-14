@@ -2,32 +2,6 @@ const root = document.getElementById("app");
 const PREVIEW = ["terminal.local", "localhost", "127.0.0.1"].includes(
   location.hostname,
 );
-const W = [
-    "#c3444d",
-    "#c94a45",
-    "#ce523e",
-    "#d15b38",
-    "#d16435",
-    "#cf6e34",
-    "#ca7937",
-    "#c3823c",
-    "#b98b44",
-    "#ad934e",
-    "#9f9959",
-  ],
-  C = [
-    "#3c8498",
-    "#428097",
-    "#497c95",
-    "#507794",
-    "#587292",
-    "#606d8e",
-    "#69688a",
-    "#726387",
-    "#7c5f82",
-    "#875b7b",
-    "#925873",
-  ];
 const samples = [
   {
     id: "s1",
@@ -132,22 +106,6 @@ const I = (n) =>
   `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">${paths[n] || ""}</svg>`;
 const jar = (x) =>
   `<div class="jar-mark${x ? " small" : ""}" aria-hidden="true"><span></span></div>`;
-const color = (i, n, p) =>
-  n <= 1
-    ? p[5]
-    : p[
-        Math.max(
-          0,
-          Math.min(
-            10,
-            Math.round(
-              (n <= 11
-                ? (100 - (n - 1) * 10) / 2 + i * 10
-                : (i * 100) / (n - 1)) / 10,
-            ),
-          ),
-        )
-      ];
 const active = () =>
     s.items
       .filter((x) => x.list === "grocery" && !x.completed)
@@ -205,19 +163,26 @@ function renderHistory() {
   root.innerHTML = `<main class="history-screen"><header class="screen-head"><button id="back" aria-label="Back">${I("back")}</button><h1>History Log</h1></header><ol class="history-list">${h || '<li class="empty-state">Actions will appear here as you use Jamjar.</li>'}</ol></main>`;
   document.getElementById("back").onclick = () => window.window.history.back();
 }
-function row(x, i, n) {
-  return `<li class="swipe-wrap${x.completed ? " is-done" : ""}" data-id="${e(x.id)}" style="--row-color:${x.completed ? "transparent" : color(i, n, x.list === "grocery" ? W : C)}"><div class="swipe-underlay${x.list === "pantry" ? " from-right" : ""}"><span class="under-icon">${I(x.list === "grocery" ? "check" : "basket")}</span><span class="under-label">${x.list === "grocery" ? (x.completed ? "Restore" : "Bought") : "Move to Grocery"}</span></div><button class="item-row" aria-label="Edit ${e(x.description)}"><span class="item-copy"><span>${e(x.description)}</span>${x.quantity ? `<small>${e(x.quantity)}</small>` : ""}</span></button></li>`;
+function row(x) {
+  const action =
+    x.list === "grocery"
+      ? x.completed
+        ? "Restore"
+        : "Mark bought"
+      : "Move to Grocery";
+  return `<li class="swipe-wrap${x.completed ? " is-done" : ""}" data-id="${e(x.id)}"><div class="swipe-underlay${x.list === "pantry" ? " from-right" : ""}"><span class="under-icon">${I(x.list === "grocery" ? "check" : "basket")}</span><span class="under-label">${x.list === "grocery" ? (x.completed ? "Restore" : "Bought") : "Move to Grocery"}</span></div><div class="item-row"><button class="item-check" aria-label="${action}: ${e(x.description)}"><span>${x.completed ? I("check") : ""}</span></button><button class="item-copy" aria-label="Edit ${e(x.description)}"><span>${e(x.description)}</span>${x.list === "grocery" && x.quantity ? `<small>${e(x.quantity)}</small>` : ""}</button></div></li>`;
 }
 function editor() {
   if (!s.editor) return "";
   const x = s.items.find((i) => i.id === s.editId),
+    hasQuantity = (x?.list || s.tab) === "grocery",
     opts = [
       ...new Set([
         ...s.items.map((i) => i.description),
         ...s.logs.map((l) => l.description),
       ]),
     ].sort();
-  return `<div class="dialog-backdrop editor"><section class="dialog dialog-wrap" role="dialog" aria-modal="true"><button class="close-x" id="x">×</button><h2>${x ? "Edit item" : `Add to ${s.tab === "pantry" ? "Pantry" : "Grocery"}`}</h2><div class="form-stack"><label>Description<input id="desc" maxlength="120" list="suggestions" value="${e(s.desc)}" placeholder="What do you need?"></label><datalist id="suggestions">${opts.map((v) => `<option value="${e(v)}"></option>`).join("")}</datalist><label>Quantity <span>Optional</span><input id="qty" maxlength="40" value="${e(s.qty)}" placeholder="2, 3 cans, 1 lb…"></label>${s.error ? `<p class="form-error">${e(s.error)}</p>` : ""}</div><div class="dialog-actions">${x ? `<button class="btn ghost delete-button" id="delAsk">${I("trash")}Delete</button>` : ""}<button class="btn ghost" id="cancel">Cancel</button><button class="btn" id="save">Save</button></div></section></div>`;
+  return `<div class="dialog-backdrop editor"><section class="dialog dialog-wrap" role="dialog" aria-modal="true"><button class="close-x" id="x">×</button><h2>${x ? "Edit item" : `Add to ${s.tab === "pantry" ? "Pantry" : "Grocery"}`}</h2><div class="form-stack"><label>Description<input id="desc" maxlength="120" list="suggestions" value="${e(s.desc)}" placeholder="What do you need?"></label><datalist id="suggestions">${opts.map((v) => `<option value="${e(v)}"></option>`).join("")}</datalist>${hasQuantity ? `<label>Quantity <span>Optional</span><input id="qty" maxlength="40" value="${e(s.qty)}" placeholder="2, 3 cans, 1 lb…"></label>` : ""}${s.error ? `<p class="form-error">${e(s.error)}</p>` : ""}</div><div class="dialog-actions">${x ? `<button class="btn ghost delete-button" id="delAsk">${I("trash")}Delete</button>` : ""}<button class="btn ghost" id="cancel">Cancel</button><button class="btn" id="save">Save</button></div></section></div>`;
 }
 function confirm() {
   if (s.clear) {
@@ -236,7 +201,7 @@ function app() {
     p = pantry(),
     u = s.actor || {},
     initial = (u.displayName?.[0] || u.email?.[0] || "?").toUpperCase();
-  root.innerHTML = `<div class="app-shell"><header class="topbar"><div class="brand">${jar(1)}<span>Jamjar</span></div><span class="sync-status">${e(s.status)}</span></header><main class="list-main"><section id="grocery-section" ${s.tab !== "grocery" ? "hidden" : ""}>${d.length ? '<div class="list-actions"><button class="clear-button" id="clearAsk">Clear completed</button></div>' : ""}<ul class="item-list">${a.map((x, i) => row(x, i, a.length)).join("")}${a.length ? "" : '<li class="empty-state">Your grocery list is empty.</li>'}${d.map((x, i) => row(x, i, d.length)).join("")}</ul></section><section id="pantry-section" ${s.tab !== "pantry" ? "hidden" : ""}><label class="search-field">${I("search")}<span class="sr-only">Search Pantry</span><input id="search" value="${e(s.query)}" placeholder="Filter pantry"></label><ul class="item-list">${p.map((x, i) => row(x, i, p.length)).join("")}${p.length ? "" : `<li class="empty-state">${s.query ? "No pantry items match." : "Your pantry is empty."}</li>`}</ul></section><section ${s.tab !== "settings" ? "hidden" : ""}><div class="settings-page"><button class="settings-row" id="hist"><span class="setting-icon">${I("history")}</span><span><strong>History Log</strong><small>See every change and who made it</small></span><span>›</span></button><div class="settings-row static"><span class="avatar">${e(initial)}</span><span><strong>${e(u.displayName || u.email || "")}</strong><small>${e(u.email || "")}</small></span></div>${s.install ? `<button class="settings-row" id="install"><span class="setting-icon">${I("package")}</span><span><strong>Install Jamjar</strong><small>Add it to this device</small></span><span>›</span></button>` : ""}<button class="settings-row danger-row" id="signout"><span class="setting-icon">${I("logout")}</span><span><strong>Sign out</strong><small>Keep shared data in Jamjar</small></span></button></div></section></main>${s.tab !== "settings" ? `<button class="fab" id="add">${I("plus")}</button>` : ""}<nav class="bottom-tabs"><button class="tab-trigger ${s.tab === "grocery" ? "active" : ""}" data-tab="grocery">${I("basket")}<span>Grocery</span>${a.length ? `<b>${a.length}</b>` : ""}</button><button class="tab-trigger ${s.tab === "pantry" ? "active" : ""}" data-tab="pantry">${I("package")}<span>Pantry</span></button><button class="tab-trigger ${s.tab === "settings" ? "active" : ""}" data-tab="settings">${I("settings")}<span>Settings</span></button></nav></div>${editor()}${confirm()}`;
+  root.innerHTML = `<div class="app-shell"><header class="topbar"><div class="brand">${jar(1)}<span>Jamjar</span></div><span class="sync-status">${e(s.status)}</span></header><main class="list-main"><section id="grocery-section" ${s.tab !== "grocery" ? "hidden" : ""}><ul class="item-list">${a.map(row).join("")}${a.length ? "" : '<li class="empty-state">Your grocery list is empty.</li>'}${d.map(row).join("")}</ul>${d.length ? `<div class="clear-pull" id="clearPull" aria-hidden="true">${I("trash")}<span>Pull up to clear completed</span></div>` : ""}</section><section id="pantry-section" ${s.tab !== "pantry" ? "hidden" : ""}><label class="search-field">${I("search")}<span class="sr-only">Search Pantry</span><input id="search" value="${e(s.query)}" placeholder="Filter pantry"></label><ul class="item-list">${p.map(row).join("")}${p.length ? "" : `<li class="empty-state">${s.query ? "No pantry items match." : "Your pantry is empty."}</li>`}</ul></section><section ${s.tab !== "settings" ? "hidden" : ""}><div class="settings-page"><button class="settings-row" id="hist"><span class="setting-icon">${I("history")}</span><span><strong>History Log</strong><small>See every change and who made it</small></span><span>›</span></button><div class="settings-row static"><span class="avatar">${e(initial)}</span><span><strong>${e(u.displayName || u.email || "")}</strong><small>${e(u.email || "")}</small></span></div>${s.install ? `<button class="settings-row" id="install"><span class="setting-icon">${I("package")}</span><span><strong>Install Jamjar</strong><small>Add it to this device</small></span><span>›</span></button>` : ""}<button class="settings-row danger-row" id="signout"><span class="setting-icon">${I("logout")}</span><span><strong>Sign out</strong><small>Keep shared data in Jamjar</small></span></button></div></section></main>${s.tab !== "settings" ? `<button class="fab" id="add">${I("plus")}</button>` : ""}<nav class="bottom-tabs"><button class="tab-trigger ${s.tab === "grocery" ? "active" : ""}" data-tab="grocery">${I("basket")}<span>Grocery</span>${a.length ? `<b>${a.length}</b>` : ""}</button><button class="tab-trigger ${s.tab === "pantry" ? "active" : ""}" data-tab="pantry">${I("package")}<span>Pantry</span></button><button class="tab-trigger ${s.tab === "settings" ? "active" : ""}" data-tab="settings">${I("settings")}<span>Settings</span></button></nav></div>${editor()}${confirm()}`;
   bind();
 }
 function render() {
@@ -248,7 +213,7 @@ function render() {
 function open(x = null) {
   s.editId = x?.id || null;
   s.desc = x?.description || "";
-  s.qty = x?.quantity || "";
+  s.qty = x?.list === "pantry" ? "" : x?.quantity || "";
   s.error = "";
   s.editor = true;
   window.history.pushState({ editor: true }, "");
@@ -264,9 +229,9 @@ function close(fromPop = false) {
 }
 async function save() {
   const desc = s.desc.trim(),
-    qty = s.qty.trim(),
     x = s.items.find((i) => i.id === s.editId),
-    list = x?.list || (s.tab === "pantry" ? "pantry" : "grocery");
+    list = x?.list || (s.tab === "pantry" ? "pantry" : "grocery"),
+    qty = list === "pantry" ? "" : s.qty.trim();
   if (!desc) {
     s.error = "Add a description.";
     return render();
@@ -313,7 +278,7 @@ async function save() {
     console.error("Jamjar save failed", error);
     s.error =
       error?.code === "permission-denied"
-        ? "Jamjar’s Firestore rules need to be published. See README.md."
+        ? "Jamjar’s Firestore rules need to be published."
         : "Jamjar couldn’t save that change. Try again.";
     render();
   }
@@ -340,6 +305,7 @@ async function move(x, to) {
     local(to === "pantry" ? "moved_to_pantry" : "moved_to_grocery", x, {
       list: to,
       completed: false,
+      quantity: "",
     });
     render();
   } else await window.JamjarFirebase?.moveItem(x, to);
@@ -365,16 +331,20 @@ async function clearAll() {
 function swipes() {
   document.querySelectorAll(".swipe-wrap").forEach((w) => {
     const b = w.querySelector(".item-row"),
+      check = w.querySelector(".item-check"),
+      copy = w.querySelector(".item-copy"),
       u = w.querySelector(".swipe-underlay"),
       l = w.querySelector(".under-label"),
       ii = w.querySelector(".under-icon"),
       x = s.items.find((v) => v.id === w.dataset.id);
     let start = 0,
+      startY = 0,
       last = 0,
       drag = false;
     if (!x) return;
     b.onpointerdown = (q) => {
       start = q.clientX;
+      startY = q.clientY;
       last = 0;
       drag = false;
       b.setPointerCapture(q.pointerId);
@@ -385,9 +355,10 @@ function swipes() {
         dir = x.list === "grocery" ? 1 : -1,
         next = raw * dir > 0 ? raw : raw * 0.08;
       last = next;
-      if (Math.abs(next) > 5) drag = true;
+      if (Math.abs(next) > 5 || Math.abs(q.clientY - startY) > 5) drag = true;
       b.style.transform = `translateX(${next}px)`;
-      const transfer = Math.abs(next) >= (innerWidth * 2) / 3;
+      const transfer =
+        x.list === "grocery" && Math.abs(next) >= innerWidth * 0.5;
       u.classList.toggle("is-transfer", transfer);
       l.textContent = transfer
         ? x.list === "grocery"
@@ -407,15 +378,101 @@ function swipes() {
         b.releasePointerCapture(q.pointerId);
       b.style.transform = "";
       const d = Math.abs(last);
-      if (d >= (innerWidth * 2) / 3)
-        move(x, x.list === "grocery" ? "pantry" : "grocery");
+      if (x.list === "grocery" && d >= innerWidth * 0.5)
+        move(x, "pantry");
       else if (d >= 64) x.list === "grocery" ? toggle(x) : move(x, "grocery");
     };
     b.onpointercancel = () => (b.style.transform = "");
-    b.onclick = () => {
+    check.onclick = () => {
+      if (!drag)
+        x.list === "grocery" ? toggle(x) : move(x, "grocery");
+    };
+    copy.onclick = () => {
       if (!drag) open(x);
     };
   });
+}
+function pullToClear() {
+  const section = document.getElementById("grocery-section"),
+    indicator = document.getElementById("clearPull");
+  if (!section || !indicator) return;
+  const threshold = 72;
+  let startX = 0,
+    startY = 0,
+    amount = 0,
+    tracking = false;
+  const atBottom = () =>
+    innerHeight + scrollY >= document.documentElement.scrollHeight - 4;
+  const nearListEnd = (y) => {
+    const bottom = section.getBoundingClientRect().bottom;
+    return y >= Math.min(innerHeight - 150, bottom - 120);
+  };
+  const show = (value) => {
+    amount = Math.max(0, Math.min(value, 96));
+    indicator.style.transform = `translateY(${64 - Math.min(amount, 64)}px)`;
+    const armed = amount >= threshold;
+    indicator.classList.toggle("armed", armed);
+    indicator.querySelector("span").textContent = armed
+      ? "Release to clear completed"
+      : "Pull up to clear completed";
+  };
+  const finish = () => {
+    if (!tracking) return;
+    const armed = amount >= threshold;
+    tracking = false;
+    show(0);
+    if (armed) {
+      s.clear = true;
+      render();
+    }
+  };
+  section.addEventListener(
+    "touchstart",
+    (event) => {
+      const touch = event.touches[0];
+      if (!touch || !atBottom() || !nearListEnd(touch.clientY)) return;
+      startX = touch.clientX;
+      startY = touch.clientY;
+      amount = 0;
+      tracking = true;
+    },
+    { passive: true },
+  );
+  section.addEventListener(
+    "touchmove",
+    (event) => {
+      if (!tracking || event.touches.length !== 1) return;
+      const touch = event.touches[0],
+        up = startY - touch.clientY,
+        sideways = Math.abs(startX - touch.clientX);
+      if (up <= 0 || up <= sideways) return;
+      event.preventDefault();
+      show(up);
+    },
+    { passive: false },
+  );
+  section.addEventListener("touchend", finish);
+  section.addEventListener("touchcancel", finish);
+  section.addEventListener("pointerdown", (event) => {
+    if (
+      event.pointerType !== "mouse" ||
+      !atBottom() ||
+      !nearListEnd(event.clientY)
+    )
+      return;
+    startX = event.clientX;
+    startY = event.clientY;
+    amount = 0;
+    tracking = true;
+  });
+  section.addEventListener("pointermove", (event) => {
+    if (!tracking || event.pointerType !== "mouse") return;
+    const up = startY - event.clientY,
+      sideways = Math.abs(startX - event.clientX);
+    if (up > 0 && up > sideways) show(up);
+  });
+  section.addEventListener("pointerup", finish);
+  section.addEventListener("pointercancel", finish);
 }
 function bind() {
   document.querySelectorAll("[data-tab]").forEach(
@@ -426,10 +483,6 @@ function bind() {
       }),
   );
   document.getElementById("add")?.addEventListener("click", () => open());
-  document.getElementById("clearAsk")?.addEventListener("click", () => {
-    s.clear = true;
-    render();
-  });
   document.getElementById("hist")?.addEventListener("click", () => {
     s.history = true;
     window.history.pushState({ history: true }, "");
@@ -472,6 +525,7 @@ function bind() {
   });
   document.getElementById("delYes")?.addEventListener("click", remove);
   swipes();
+  pullToClear();
 }
 addEventListener("beforeinstallprompt", (q) => {
   q.preventDefault();
@@ -485,6 +539,11 @@ addEventListener("popstate", () => {
     return render();
   }
   if (s.editor) return close(true);
+});
+addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || !s.editor || s.del) return;
+  event.preventDefault();
+  close();
 });
 if (!PREVIEW) {
   addEventListener("jamjar:firebase-ready", () => {

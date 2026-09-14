@@ -175,6 +175,7 @@ window.JamjarFirebase = {
         ...item,
         list: toList,
         completed: false,
+        quantity: "",
         updatedAt: Date.now(),
       };
       batch.set(doc(itemsRef, item.id), next);
