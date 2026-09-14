@@ -1,44 +1,26 @@
-// Add these matches inside your existing Firestore ruleset.
+// Publish this complete ruleset in the jamjar-ec8c6 Firebase project.
 // Only Kevin and Megan's verified Google accounts can access Jamjar.
 
-function isJamjarMember() {
-  return request.auth != null
-    && request.auth.token.email_verified == true
-    && request.auth.token.email in ['allenkevinc@gmail.com', 'meganec96@gmail.com'];
-}
+rules_version = '2';
 
-match /jamjarHouseholds/shared/items/{itemId} {
-  allow read, delete: if isJamjarMember();
-  allow create, update: if isJamjarMember()
-    && request.resource.data.keys().hasOnly(['id', 'description', 'quantity', 'list', 'completed', 'createdAt', 'updatedAt'])
-    && request.resource.data.id == itemId
-    && request.resource.data.description is string
-    && request.resource.data.description.size() > 0
-    && request.resource.data.description.size() <= 120
-    && request.resource.data.quantity is string
-    && request.resource.data.quantity.size() <= 40
-    && request.resource.data.list in ['grocery', 'pantry']
-    && request.resource.data.completed is bool
-    && request.resource.data.createdAt is int
-    && request.resource.data.updatedAt is int;
-}
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isJamjarMember() {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && request.auth.token.email in ['allenkevinc@gmail.com', 'meganec96@gmail.com'];
+    }
 
-match /jamjarHouseholds/shared/history/{historyId} {
-  allow read: if isJamjarMember();
-  allow create: if isJamjarMember()
-    && request.resource.data.keys().hasOnly(['action', 'description', 'quantity', 'fromList', 'toList', 'createdAt', 'actorUid', 'actorEmail', 'actorName'])
-    && request.resource.data.actorUid == request.auth.uid
-    && request.resource.data.actorEmail == request.auth.token.email
-    && request.resource.data.description is string
-    && request.resource.data.description.size() > 0
-    && request.resource.data.description.size() <= 120
-    && request.resource.data.quantity is string
-    && request.resource.data.quantity.size() <= 40
-    && request.resource.data.fromList in ['', 'grocery', 'pantry']
-    && request.resource.data.toList in ['', 'grocery', 'pantry']
-    && request.resource.data.createdAt is int
-    && request.resource.data.actorName is string
-    && request.resource.data.actorName.size() <= 120
-    && request.resource.data.action in ['added', 'updated', 'deleted', 'bought', 'restored', 'moved_to_pantry', 'moved_to_grocery', 'cleared'];
-  allow update, delete: if false;
+    match /jamjarHouseholds/shared/items/{itemId} {
+      allow read, write: if isJamjarMember();
+    }
+
+    match /jamjarHouseholds/shared/history/{historyId} {
+      allow read: if isJamjarMember();
+      allow create: if isJamjarMember()
+        && request.resource.data.actorUid == request.auth.uid
+        && request.resource.data.actorEmail == request.auth.token.email;
+      allow update, delete: if false;
+    }
+  }
 }
