@@ -1,6 +1,6 @@
-const CACHE = 'jamjar-shell-v2';
+const CACHE = 'jamjar-shell-v3';
 const BASE = new URL('./', self.registration.scope).pathname;
-const ASSETS = [BASE, `${BASE}manifest.webmanifest`, `${BASE}favicon.svg`, `${BASE}icon-192.png`, `${BASE}icon-512.png`, `${BASE}fonts/figtree.woff2`, `${BASE}firebase-client.js`, `${BASE}vendor/firebase-app.js`, `${BASE}vendor/firebase-auth.js`, `${BASE}vendor/firebase-firestore.js`];
+const ASSETS = [BASE, `${BASE}index.html`, `${BASE}styles.css`, `${BASE}app.js`, `${BASE}manifest.webmanifest`, `${BASE}favicon.svg`, `${BASE}icon-192.png`, `${BASE}icon-512.png`, `${BASE}fonts/figtree.woff2`, `${BASE}firebase-client.js`, `${BASE}vendor/firebase-app.js`, `${BASE}vendor/firebase-auth.js`, `${BASE}vendor/firebase-firestore.js`];
 self.addEventListener('install', event => event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(ASSETS)).then(() => self.skipWaiting())));
 self.addEventListener('activate', event => event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(key => key !== CACHE).map(key => caches.delete(key)))).then(() => self.clients.claim())));
 self.addEventListener('fetch', event => {
