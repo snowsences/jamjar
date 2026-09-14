@@ -1,4 +1,4 @@
-const CACHE = "jamjar-shell-v7";
+const CACHE = "jamjar-shell-v8";
 const BASE = new URL("./", self.registration.scope).pathname;
 const ASSETS = [
   BASE,
@@ -11,6 +11,7 @@ const ASSETS = [
   `${BASE}icon-512.png`,
   `${BASE}fonts/figtree-400.ttf`,
   `${BASE}fonts/figtree-500.ttf`,
+  `${BASE}fonts/figtree-600.ttf`,
   `${BASE}firebase-client.js`,
   `${BASE}vendor/firebase-app.js`,
   `${BASE}vendor/firebase-auth.js`,

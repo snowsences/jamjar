@@ -2,6 +2,10 @@ const root = document.getElementById("app");
 const PREVIEW = ["terminal.local", "localhost", "127.0.0.1"].includes(
   location.hostname,
 );
+const PALETTES = {
+  grocery: ["#E32960", "#F9732F", "#FEA000"],
+  pantry: ["#007DC2", "#00AB6C", "#8AD928"],
+};
 const samples = [
   {
     id: "s1",
@@ -106,6 +110,34 @@ const I = (n) =>
   `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">${paths[n] || ""}</svg>`;
 const jar = (x) =>
   `<div class="jar-mark${x ? " small" : ""}" aria-hidden="true"><span></span></div>`;
+const mixColor = (from, to, amount) => {
+  const a = from.match(/[\da-f]{2}/gi).map((v) => parseInt(v, 16)),
+    b = to.match(/[\da-f]{2}/gi).map((v) => parseInt(v, 16));
+  return `#${a
+    .map((v, i) =>
+      Math.round(v + (b[i] - v) * amount)
+        .toString(16)
+        .padStart(2, "0"),
+    )
+    .join("")}`;
+};
+const gradientPosition = (index, total) => {
+  if (total <= 1) return 50;
+  if (total <= 11) return 50 + (index - (total - 1) / 2) * 10;
+  if (total <= 101) return (index * 100) / (total - 1);
+  return index % 101;
+};
+const gradientColor = (colors, percent) =>
+  percent <= 50
+    ? mixColor(colors[0], colors[1], percent / 50)
+    : mixColor(colors[1], colors[2], (percent - 50) / 50);
+const rowColors = (list, index, total) => {
+  const base = gradientColor(PALETTES[list], gradientPosition(index, total));
+  return {
+    top: mixColor(base, "#ffffff", 0.0225),
+    bottom: mixColor(base, "#000000", 0.0225),
+  };
+};
 const active = () =>
     s.items
       .filter((x) => x.list === "grocery" && !x.completed)
@@ -163,14 +195,9 @@ function renderHistory() {
   root.innerHTML = `<main class="history-screen"><header class="screen-head"><button id="back" aria-label="Back">${I("back")}</button><h1>History Log</h1></header><ol class="history-list">${h || '<li class="empty-state">Actions will appear here as you use Jamjar.</li>'}</ol></main>`;
   document.getElementById("back").onclick = () => window.window.history.back();
 }
-function row(x) {
-  const action =
-    x.list === "grocery"
-      ? x.completed
-        ? "Restore"
-        : "Mark bought"
-      : "Move to Grocery";
-  return `<li class="swipe-wrap${x.completed ? " is-done" : ""}" data-id="${e(x.id)}"><div class="swipe-underlay${x.list === "pantry" ? " from-right" : ""}"><span class="under-icon">${I(x.list === "grocery" ? "check" : "basket")}</span><span class="under-label">${x.list === "grocery" ? (x.completed ? "Restore" : "Bought") : "Move to Grocery"}</span></div><div class="item-row"><button class="item-check" aria-label="${action}: ${e(x.description)}"><span>${x.completed ? I("check") : ""}</span></button><button class="item-copy" aria-label="Edit ${e(x.description)}"><span>${e(x.description)}</span>${x.list === "grocery" && x.quantity ? `<small>${e(x.quantity)}</small>` : ""}</button></div></li>`;
+function row(x, i, n) {
+  const colors = rowColors(x.list, i, n);
+  return `<li class="swipe-wrap${x.completed ? " is-done" : ""}" data-id="${e(x.id)}"><div class="swipe-underlay${x.list === "pantry" ? " from-right" : ""}"><span class="under-icon">${I(x.list === "grocery" ? "check" : "basket")}</span><span class="under-label">${x.list === "grocery" ? (x.completed ? "Restore" : "Bought") : "Move to Grocery"}</span></div><button class="item-row" aria-label="Edit ${e(x.description)}" style="--band-top:${colors.top};--band-bottom:${colors.bottom}"><span class="item-copy"><span data-text="${e(x.description)}">${e(x.description)}</span>${x.list === "grocery" && x.quantity ? `<small>${e(x.quantity)}</small>` : ""}</span></button></li>`;
 }
 function editor() {
   if (!s.editor) return "";
@@ -182,7 +209,7 @@ function editor() {
         ...s.logs.map((l) => l.description),
       ]),
     ].sort();
-  return `<div class="dialog-backdrop editor"><section class="dialog dialog-wrap" role="dialog" aria-modal="true"><button class="close-x" id="x">×</button><h2>${x ? "Edit item" : `Add to ${s.tab === "pantry" ? "Pantry" : "Grocery"}`}</h2><div class="form-stack"><label>Description<input id="desc" maxlength="120" list="suggestions" value="${e(s.desc)}" placeholder="What do you need?"></label><datalist id="suggestions">${opts.map((v) => `<option value="${e(v)}"></option>`).join("")}</datalist>${hasQuantity ? `<label>Quantity <span>Optional</span><input id="qty" maxlength="40" value="${e(s.qty)}" placeholder="2, 3 cans, 1 lb…"></label>` : ""}${s.error ? `<p class="form-error">${e(s.error)}</p>` : ""}</div><div class="dialog-actions">${x ? `<button class="btn ghost delete-button" id="delAsk">${I("trash")}Delete</button>` : ""}<button class="btn ghost" id="cancel">Cancel</button><button class="btn" id="save">Save</button></div></section></div>`;
+  return `<div class="dialog-backdrop editor"><section class="dialog dialog-wrap" role="dialog" aria-modal="true"><button class="close-x" id="x" aria-label="Close editor">×</button><h2>${x ? "Edit item" : `Add to ${s.tab === "pantry" ? "Pantry" : "Grocery"}`}</h2><div class="form-stack"><label>Description<input id="desc" maxlength="120" list="suggestions" value="${e(s.desc)}" placeholder="What do you need?"></label><datalist id="suggestions">${opts.map((v) => `<option value="${e(v)}"></option>`).join("")}</datalist>${hasQuantity ? `<label>Quantity <span>Optional</span><input id="qty" maxlength="40" value="${e(s.qty)}" placeholder="2, 3 cans, 1 lb…"></label>` : ""}${s.error ? `<p class="form-error">${e(s.error)}</p>` : ""}</div><div class="dialog-actions">${x ? `<button class="btn ghost delete-button" id="delAsk">${I("trash")}Delete</button>` : ""}<button class="btn ghost" id="cancel">Cancel</button><button class="btn" id="save">Save</button></div></section></div>`;
 }
 function confirm() {
   if (s.clear) {
@@ -201,14 +228,58 @@ function app() {
     p = pantry(),
     u = s.actor || {},
     initial = (u.displayName?.[0] || u.email?.[0] || "?").toUpperCase();
-  root.innerHTML = `<div class="app-shell"><header class="topbar"><div class="brand">${jar(1)}<span>Jamjar</span></div><span class="sync-status">${e(s.status)}</span></header><main class="list-main"><section id="grocery-section" ${s.tab !== "grocery" ? "hidden" : ""}><ul class="item-list">${a.map(row).join("")}${a.length ? "" : '<li class="empty-state">Your grocery list is empty.</li>'}${d.map(row).join("")}</ul>${d.length ? `<div class="clear-pull" id="clearPull" aria-hidden="true">${I("trash")}<span>Pull up to clear completed</span></div>` : ""}</section><section id="pantry-section" ${s.tab !== "pantry" ? "hidden" : ""}><label class="search-field">${I("search")}<span class="sr-only">Search Pantry</span><input id="search" value="${e(s.query)}" placeholder="Filter pantry"></label><ul class="item-list">${p.map(row).join("")}${p.length ? "" : `<li class="empty-state">${s.query ? "No pantry items match." : "Your pantry is empty."}</li>`}</ul></section><section ${s.tab !== "settings" ? "hidden" : ""}><div class="settings-page"><button class="settings-row" id="hist"><span class="setting-icon">${I("history")}</span><span><strong>History Log</strong><small>See every change and who made it</small></span><span>›</span></button><div class="settings-row static"><span class="avatar">${e(initial)}</span><span><strong>${e(u.displayName || u.email || "")}</strong><small>${e(u.email || "")}</small></span></div>${s.install ? `<button class="settings-row" id="install"><span class="setting-icon">${I("package")}</span><span><strong>Install Jamjar</strong><small>Add it to this device</small></span><span>›</span></button>` : ""}<button class="settings-row danger-row" id="signout"><span class="setting-icon">${I("logout")}</span><span><strong>Sign out</strong><small>Keep shared data in Jamjar</small></span></button></div></section></main>${s.tab !== "settings" ? `<button class="fab" id="add">${I("plus")}</button>` : ""}<nav class="bottom-tabs"><button class="tab-trigger ${s.tab === "grocery" ? "active" : ""}" data-tab="grocery">${I("basket")}<span>Grocery</span>${a.length ? `<b>${a.length}</b>` : ""}</button><button class="tab-trigger ${s.tab === "pantry" ? "active" : ""}" data-tab="pantry">${I("package")}<span>Pantry</span></button><button class="tab-trigger ${s.tab === "settings" ? "active" : ""}" data-tab="settings">${I("settings")}<span>Settings</span></button></nav></div>${editor()}${confirm()}`;
+  root.innerHTML = `<div class="app-shell tab-${s.tab}"><header class="topbar"><div class="brand">${jar(1)}<span>Jamjar</span></div><span class="sync-status">${e(s.status)}</span></header><main class="list-main"><section id="grocery-section" ${s.tab !== "grocery" ? "hidden" : ""}><ul class="item-list">${a.map((x, i) => row(x, i, a.length)).join("")}${a.length ? "" : '<li class="empty-state">Your grocery list is empty.</li>'}${d.map((x, i) => row(x, i, d.length)).join("")}</ul>${d.length ? `<div class="clear-pull" id="clearPull" aria-hidden="true">${I("trash")}<span>Pull up to clear completed</span></div>` : ""}</section><section id="pantry-section" ${s.tab !== "pantry" ? "hidden" : ""}><label class="search-field">${I("search")}<span class="sr-only">Search Pantry</span><input id="search" value="${e(s.query)}" placeholder="Filter pantry"></label><ul class="item-list">${p.map((x, i) => row(x, i, p.length)).join("")}${p.length ? "" : `<li class="empty-state">${s.query ? "No pantry items match." : "Your pantry is empty."}</li>`}</ul></section><section ${s.tab !== "settings" ? "hidden" : ""}><div class="settings-page"><button class="settings-row" id="hist"><span class="setting-icon">${I("history")}</span><span><strong>History Log</strong><small>See every change and who made it</small></span><span>›</span></button><div class="settings-row static"><span class="avatar">${e(initial)}</span><span><strong>${e(u.displayName || u.email || "")}</strong><small>${e(u.email || "")}</small></span></div>${s.install ? `<button class="settings-row" id="install"><span class="setting-icon">${I("package")}</span><span><strong>Install Jamjar</strong><small>Add it to this device</small></span><span>›</span></button>` : ""}<button class="settings-row danger-row" id="signout"><span class="setting-icon">${I("logout")}</span><span><strong>Sign out</strong><small>Keep shared data in Jamjar</small></span></button></div></section></main>${s.tab !== "settings" ? `<button class="fab" id="add">${I("plus")}</button>` : ""}<nav class="bottom-tabs"><button class="tab-trigger ${s.tab === "grocery" ? "active" : ""}" data-tab="grocery">${I("basket")}<span>Grocery</span>${a.length ? `<b>${a.length}</b>` : ""}</button><button class="tab-trigger ${s.tab === "pantry" ? "active" : ""}" data-tab="pantry">${I("package")}<span>Pantry</span></button><button class="tab-trigger ${s.tab === "settings" ? "active" : ""}" data-tab="settings">${I("settings")}<span>Settings</span></button></nav></div>${editor()}${confirm()}`;
   bind();
 }
+function captureLayout() {
+  const positions = new Map(),
+    states = new Map();
+  document.querySelectorAll(".swipe-wrap[data-id]").forEach((row) => {
+    positions.set(row.dataset.id, row.getBoundingClientRect().top);
+    states.set(row.dataset.id, row.classList.contains("is-done"));
+  });
+  return { positions, states };
+}
+function animateLayout(previous) {
+  if (!previous.positions.size) return;
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  document.querySelectorAll(".swipe-wrap[data-id]").forEach((row) => {
+    const id = row.dataset.id,
+      wasDone = previous.states.get(id),
+      isDone = row.classList.contains("is-done"),
+      label = row.querySelector(".item-copy > span");
+    if (!reduced && wasDone === false && isDone)
+      label?.classList.add("strike-entering");
+    else if (!reduced && wasDone === true && !isDone)
+      label?.classList.add("strike-leaving");
+    if (
+      label?.classList.contains("strike-entering") ||
+      label?.classList.contains("strike-leaving")
+    )
+      setTimeout(
+        () => label.classList.remove("strike-entering", "strike-leaving"),
+        500,
+      );
+    if (reduced || !row.animate) return;
+    const oldTop = previous.positions.get(id),
+      newTop = row.getBoundingClientRect().top;
+    if (oldTop !== undefined && Math.abs(oldTop - newTop) > 0.5)
+      row.animate(
+        [
+          { transform: `translateY(${oldTop - newTop}px)` },
+          { transform: "translateY(0)" },
+        ],
+        { duration: 300, easing: "cubic-bezier(0.37, 0, 0.63, 1)" },
+      );
+  });
+}
 function render() {
+  const previous = captureLayout();
   if (!s.authKnown && !PREVIEW) return gate();
   if (!s.actor && !PREVIEW) return gate();
   if (s.history) return renderHistory();
   app();
+  animateLayout(previous);
 }
 function open(x = null) {
   s.editId = x?.id || null;
@@ -331,8 +402,6 @@ async function clearAll() {
 function swipes() {
   document.querySelectorAll(".swipe-wrap").forEach((w) => {
     const b = w.querySelector(".item-row"),
-      check = w.querySelector(".item-check"),
-      copy = w.querySelector(".item-copy"),
       u = w.querySelector(".swipe-underlay"),
       l = w.querySelector(".under-label"),
       ii = w.querySelector(".under-icon"),
@@ -340,23 +409,47 @@ function swipes() {
     let start = 0,
       startY = 0,
       last = 0,
-      drag = false;
+      drag = false,
+      horizontal = false,
+      vertical = false;
     if (!x) return;
     b.onpointerdown = (q) => {
+      if (q.button !== 0) return;
       start = q.clientX;
       startY = q.clientY;
       last = 0;
       drag = false;
+      horizontal = false;
+      vertical = false;
       b.setPointerCapture(q.pointerId);
     };
     b.onpointermove = (q) => {
-      if (!b.hasPointerCapture(q.pointerId)) return;
+      if (!b.hasPointerCapture(q.pointerId) || vertical) return;
       const raw = q.clientX - start,
+        y = q.clientY - startY,
         dir = x.list === "grocery" ? 1 : -1,
         next = raw * dir > 0 ? raw : raw * 0.08;
+      if (!horizontal && Math.abs(y) > 8 && Math.abs(y) > Math.abs(raw)) {
+        vertical = true;
+        drag = true;
+        return;
+      }
+      if (!horizontal && Math.abs(raw) > 8 && Math.abs(raw) > Math.abs(y))
+        horizontal = true;
+      if (!horizontal) return;
+      q.preventDefault();
       last = next;
-      if (Math.abs(next) > 5 || Math.abs(q.clientY - startY) > 5) drag = true;
+      drag = true;
+      b.classList.add("dragging");
       b.style.transform = `translateX(${next}px)`;
+      w.classList.toggle(
+        "swiping-right",
+        x.list === "grocery" && next > 12,
+      );
+      w.classList.toggle(
+        "swiping-left",
+        x.list === "pantry" && next < -12,
+      );
       const transfer =
         x.list === "grocery" && Math.abs(next) >= innerWidth * 0.5;
       u.classList.toggle("is-transfer", transfer);
@@ -376,18 +469,30 @@ function swipes() {
     b.onpointerup = (q) => {
       if (b.hasPointerCapture(q.pointerId))
         b.releasePointerCapture(q.pointerId);
-      b.style.transform = "";
       const d = Math.abs(last);
-      if (x.list === "grocery" && d >= innerWidth * 0.5)
-        move(x, "pantry");
-      else if (d >= 64) x.list === "grocery" ? toggle(x) : move(x, "grocery");
+      b.classList.remove("dragging");
+      w.classList.remove("swiping-right", "swiping-left");
+      if (x.list === "grocery" && d >= innerWidth * 0.5) {
+        b.classList.add("completing");
+        navigator.vibrate?.(12);
+        return setTimeout(() => move(x, "pantry"), 180);
+      }
+      if (d >= 64) {
+        b.classList.add(x.list === "grocery" ? "completing" : "moving-left");
+        navigator.vibrate?.(12);
+        return setTimeout(
+          () => (x.list === "grocery" ? toggle(x) : move(x, "grocery")),
+          180,
+        );
+      }
+      b.style.transform = "";
     };
-    b.onpointercancel = () => (b.style.transform = "");
-    check.onclick = () => {
-      if (!drag)
-        x.list === "grocery" ? toggle(x) : move(x, "grocery");
+    b.onpointercancel = () => {
+      b.classList.remove("dragging");
+      w.classList.remove("swiping-right", "swiping-left");
+      b.style.transform = "";
     };
-    copy.onclick = () => {
+    b.onclick = () => {
       if (!drag) open(x);
     };
   });
@@ -620,7 +725,7 @@ if (mc?.registerTool) {
           )
         )
           throw Error("That item is already on the list.");
-        const quantity = v?.quantity?.trim() || "";
+        const quantity = list === "pantry" ? "" : v?.quantity?.trim() || "";
         if (PREVIEW)
           local("add", {
             id: crypto.randomUUID(),
@@ -665,10 +770,7 @@ if (mc?.registerTool) {
               (i) =>
                 i.list === "pantry" && i.description.toLowerCase().includes(q),
             )
-            .map((i) => ({
-              description: i.description,
-              quantity: i.quantity || "",
-            })),
+            .map((i) => ({ description: i.description })),
         };
       },
     },
