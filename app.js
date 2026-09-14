@@ -77,6 +77,7 @@ const s = {
   del: false,
   status: PREVIEW ? "Preview data" : "Connecting…",
   install: false,
+  revealId: null,
 };
 let installPrompt = null;
 const e = (x) =>
@@ -141,11 +142,15 @@ const rowColors = (list, index, total) => {
 const active = () =>
     s.items
       .filter((x) => x.list === "grocery" && !x.completed)
-      .sort((a, b) => b.createdAt - a.createdAt),
+      .sort(
+        (a, b) =>
+          (a.listAddedAt || a.createdAt || 0) -
+          (b.listAddedAt || b.createdAt || 0),
+      ),
   done = () =>
     s.items
       .filter((x) => x.list === "grocery" && x.completed)
-      .sort((a, b) => b.updatedAt - a.updatedAt),
+      .sort((a, b) => (a.updatedAt || 0) - (b.updatedAt || 0)),
   pantry = () =>
     s.items
       .filter(
@@ -153,7 +158,11 @@ const active = () =>
           x.list === "pantry" &&
           x.description.toLowerCase().includes(s.query.trim().toLowerCase()),
       )
-      .sort((a, b) => a.description.localeCompare(b.description));
+      .sort(
+        (a, b) =>
+          (a.listAddedAt || a.createdAt || 0) -
+          (b.listAddedAt || b.createdAt || 0),
+      );
 function local(action, item, patch = {}) {
   const now = Date.now();
   if (action === "add") s.items = [{ ...item, ...patch }, ...s.items];
@@ -277,6 +286,22 @@ function animateLayout(previous) {
       );
   });
 }
+function revealPendingItem() {
+  if (!s.revealId) return;
+  const row = [...document.querySelectorAll(".swipe-wrap[data-id]")].find(
+    (item) => item.dataset.id === s.revealId,
+  );
+  if (!row) return;
+  s.revealId = null;
+  requestAnimationFrame(() =>
+    row.scrollIntoView({
+      behavior: matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? "auto"
+        : "smooth",
+      block: "end",
+    }),
+  );
+}
 function render() {
   const previous = captureLayout();
   if (!s.authKnown && !PREVIEW) return gate();
@@ -284,6 +309,7 @@ function render() {
   if (s.history) return renderHistory();
   app();
   animateLayout(previous);
+  revealPendingItem();
 }
 function open(x = null) {
   s.editId = x?.id || null;
@@ -339,10 +365,13 @@ async function save() {
         completed: false,
         createdAt: Date.now(),
         updatedAt: Date.now(),
+        listAddedAt: Date.now(),
       };
+      s.revealId = n.id;
       if (PREVIEW) local("add", n);
       else
         await window.JamjarFirebase?.addItem({
+          id: n.id,
           description: desc,
           quantity: qty,
           list,
@@ -360,7 +389,10 @@ async function save() {
 }
 async function toggle(x) {
   if (PREVIEW) {
-    local(x.completed ? "restored" : "bought", x, { completed: !x.completed });
+    local(x.completed ? "restored" : "bought", x, {
+      completed: !x.completed,
+      ...(x.completed ? { listAddedAt: Date.now() } : {}),
+    });
     render();
   } else await window.JamjarFirebase?.toggleBought(x);
 }
@@ -381,6 +413,7 @@ async function move(x, to) {
       list: to,
       completed: false,
       quantity: "",
+      listAddedAt: Date.now(),
     });
     render();
   } else await window.JamjarFirebase?.moveItem(x, to);
@@ -741,19 +774,24 @@ if (mc?.registerTool) {
           )
         )
           throw Error("That item is already on the list.");
-        const quantity = list === "pantry" ? "" : v?.quantity?.trim() || "";
+        const quantity = list === "pantry" ? "" : v?.quantity?.trim() || "",
+          id = crypto.randomUUID(),
+          now = Date.now();
+        s.revealId = id;
         if (PREVIEW)
           local("add", {
-            id: crypto.randomUUID(),
+            id,
             description: d,
             quantity,
             list,
             completed: false,
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
+            createdAt: now,
+            updatedAt: now,
+            listAddedAt: now,
           });
         else
           await window.JamjarFirebase?.addItem({
+            id,
             description: d,
             quantity,
             list,

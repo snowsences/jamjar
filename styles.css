@@ -251,6 +251,7 @@ strong {
   overflow: hidden;
   background: #304e5b;
   isolation: isolate;
+  scroll-margin-bottom: calc(112px + env(safe-area-inset-bottom));
 }
 .swipe-wrap + .swipe-wrap {
   border-top: 0;
@@ -809,6 +810,18 @@ strong {
   }
   .app-shell.tab-grocery #grocery-section {
     min-height: calc(100dvh - 102px - env(safe-area-inset-bottom));
+  }
+  .app-shell.tab-pantry #pantry-section {
+    min-height: calc(100dvh - 102px - env(safe-area-inset-bottom));
+  }
+  .app-shell.tab-grocery #grocery-section,
+  .app-shell.tab-pantry #pantry-section {
+    display: flex;
+    flex-direction: column;
+  }
+  .app-shell.tab-grocery .item-list,
+  .app-shell.tab-pantry .item-list {
+    margin-top: auto;
   }
   .topbar {
     height: calc(64px + env(safe-area-inset-top));
