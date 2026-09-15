@@ -115,6 +115,7 @@ const s = {
   saving: false,
 };
 let installPrompt = null;
+let renderFrame = 0;
 const e = (x) =>
   String(x ?? "").replace(
     /[&<>"']/g,
@@ -350,7 +351,11 @@ function row(x, i, n) {
     x.list === "pantry"
       ? normalizedCategory(x.category)
       : x.quantity || "";
-  return `<li class="swipe-wrap${x.completed ? " is-done" : ""}" data-id="${e(x.id)}">${actions}<button class="item-row" aria-label="Edit ${e(x.description)}" style="--band-top:${colors.top};--band-bottom:${colors.bottom}"><span class="item-copy"><span data-text="${e(x.description)}">${e(x.description)}</span>${metadata ? `<small>${e(metadata)}</small>` : ""}</span></button></li>`;
+  const pantryMove =
+    x.list === "pantry"
+      ? `<button type="button" class="pantry-to-groceries" data-move-to-groceries="${e(x.id)}" aria-label="Add ${e(x.description)} to Groceries">${I("basket")}</button>`
+      : "";
+  return `<li class="swipe-wrap${x.completed ? " is-done" : ""}${x.list === "pantry" ? " pantry-row" : ""}" data-id="${e(x.id)}">${actions}<button class="item-row" aria-label="Edit ${e(x.description)}" style="--band-top:${colors.top};--band-bottom:${colors.bottom}"><span class="item-copy"><span data-text="${e(x.description)}">${e(x.description)}</span>${metadata ? `<small>${e(metadata)}</small>` : ""}</span></button>${pantryMove}</li>`;
 }
 function pantryRows(items) {
   const totals = new Map();
@@ -388,10 +393,7 @@ function editor() {
   const categorySelector = hasQuantity
     ? ""
     : `<div class="category-selector" role="group" aria-label="Category">${ITEM_CATEGORIES.map((category) => `<button type="button" class="category-choice${s.itemCategory === category ? " active" : ""}" data-item-category="${e(category)}" aria-pressed="${s.itemCategory === category}">${e(category)}</button>`).join("")}</div>`;
-  const pantryEdit = Boolean(x && editorList === "pantry"),
-    actions = pantryEdit
-      ? `<div class="dialog-actions pantry-edit-actions"><button class="btn ghost move-to-groceries" id="moveToGroceries" ${s.saving ? "disabled" : ""}>Add to Groceries</button><button class="btn" id="save" ${s.saving ? "disabled" : ""}>${s.saving ? "Saving…" : "Save"}</button><button class="btn ghost lower-cancel" id="cancel">Cancel</button><button class="btn ghost delete-button" id="delAsk">${I("trash")}Delete</button></div>`
-      : `<div class="dialog-actions"><button class="btn ghost" id="cancel">Cancel</button><button class="btn" id="save" ${s.saving ? "disabled" : ""}>${s.saving ? "Saving…" : "Save"}</button>${x ? `<button class="btn ghost delete-button" id="delAsk">${I("trash")}Delete</button>` : ""}</div>`;
+  const actions = `<div class="dialog-actions"><button class="btn ghost" id="cancel">Cancel</button><button class="btn" id="save" ${s.saving ? "disabled" : ""}>${s.saving ? "Saving…" : "Save"}</button>${x ? `<button class="btn ghost delete-button" id="delAsk">${I("trash")}Delete</button>` : ""}</div>`;
   return `<div class="dialog-backdrop editor"><section class="dialog dialog-wrap" role="dialog" aria-modal="true"><button class="close-x" id="x" aria-label="Close editor">×</button><h2>${x ? "Edit item" : `Add to ${listLabel(editorList)}`}</h2><div class="form-stack"><label>Description<input id="desc" maxlength="120" list="suggestions" value="${e(s.desc)}" placeholder="${descriptionPlaceholder}"></label><datalist id="suggestions">${opts.map((v) => `<option value="${e(v)}"></option>`).join("")}</datalist>${categorySelector}${hasQuantity ? `<label>Quantity <span>Optional</span><input id="qty" maxlength="40" value="${e(s.qty)}" placeholder="2, 3 cans, 1 lb…"></label>` : ""}${s.error ? `<p class="form-error" role="alert">${e(s.error)}</p>` : ""}</div>${actions}</section></div>`;
 }
 function confirm() {
@@ -440,16 +442,23 @@ function app() {
 function captureLayout() {
   const positions = new Map(),
     states = new Map();
-  document.querySelectorAll(".swipe-wrap[data-id]").forEach((row) => {
+  visibleRows().forEach((row) => {
     positions.set(row.dataset.id, row.getBoundingClientRect().top);
     states.set(row.dataset.id, row.classList.contains("is-done"));
   });
   return { positions, states };
 }
+function visibleRows() {
+  return [...document.querySelectorAll(".swipe-wrap[data-id]")].filter(
+    (row) =>
+      !row.closest(".pantry-page-adjacent") &&
+      !row.closest("section[hidden]"),
+  );
+}
 function animateLayout(previous) {
   if (!previous.positions.size) return;
   const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  document.querySelectorAll(".swipe-wrap[data-id]").forEach((row) => {
+  visibleRows().forEach((row) => {
     const id = row.dataset.id,
       wasDone = previous.states.get(id),
       isDone = row.classList.contains("is-done"),
@@ -481,7 +490,7 @@ function animateLayout(previous) {
 }
 function revealPendingItem() {
   if (!s.revealId) return;
-  const row = [...document.querySelectorAll(".swipe-wrap[data-id]")].find(
+  const row = visibleRows().find(
     (item) => item.dataset.id === s.revealId,
   );
   if (!row) return;
@@ -560,15 +569,15 @@ function animatePantryPage(outgoing, direction) {
   host.insertBefore(outgoing, incoming);
   const outgoingAnimation = outgoing.animate(
       [
-        { transform: "translateX(0)" },
-        { transform: `translateX(${forward ? "-100%" : "100%"})` },
+        { transform: "translate3d(0,0,0)" },
+        { transform: `translate3d(${forward ? "-100%" : "100%"},0,0)` },
       ],
       options,
     ),
     incomingAnimation = incoming.animate(
       [
-        { transform: `translateX(${forward ? "100%" : "-100%"})` },
-        { transform: "translateX(0)" },
+        { transform: `translate3d(${forward ? "100%" : "-100%"},0,0)` },
+        { transform: "translate3d(0,0,0)" },
       ],
       options,
     );
@@ -582,44 +591,70 @@ function animatePantryPage(outgoing, direction) {
 }
 function pantryCategorySwipes() {
   const surface = document.querySelector(".pantry-page-surface"),
-    currentPage = surface?.querySelector(".pantry-page");
-  if (!surface || !currentPage) return;
+    currentPage = surface?.querySelector(".pantry-page:not(.pantry-page-adjacent)");
+  if (!surface || !currentPage || s.tab !== "pantry") return;
   let startX = 0,
     startY = 0,
     startTime = 0,
     lastX = 0,
+    pendingX = 0,
+    dragFrame = 0,
     pointerId = null,
     horizontal = false,
     vertical = false,
     adjacentPage = null,
     direction = 0,
     suppressClickUntil = 0;
+  const adjacentPages = new Map();
   const categoryIndex = () => PANTRY_CATEGORIES.indexOf(s.pantryCategory);
   const makeAdjacentPage = (nextDirection) => {
     const nextIndex = categoryIndex() + nextDirection;
-    if (nextIndex < 0 || nextIndex >= PANTRY_CATEGORIES.length) {
-      adjacentPage?.remove();
-      adjacentPage = null;
-      direction = nextDirection;
-      return null;
-    }
-    if (adjacentPage && direction === nextDirection) return adjacentPage;
-    adjacentPage?.remove();
-    direction = nextDirection;
+    if (nextIndex < 0 || nextIndex >= PANTRY_CATEGORIES.length) return null;
+    if (adjacentPages.has(nextDirection))
+      return adjacentPages.get(nextDirection);
     const category = PANTRY_CATEGORIES[nextIndex],
       items = pantryItems(category, ""),
       holder = document.createElement("div");
     holder.className = "pantry-page pantry-page-adjacent";
+    holder.setAttribute("aria-hidden", "true");
     holder.innerHTML = `<ul class="item-list">${pantryRows(items)}${items.length ? "" : `<li class="empty-state">${category === "All" ? "Your pantry is empty." : "No items in this category."}</li>`}</ul>`;
-    holder.style.transform = `translateX(${nextDirection * surface.clientWidth}px)`;
+    holder.style.transform = `translate3d(${nextDirection * 100}%,0,0)`;
     surface.append(holder);
-    adjacentPage = holder;
+    adjacentPages.set(nextDirection, holder);
     return holder;
   };
+  const paintDrag = (value) => {
+    dragFrame = 0;
+    const nextDirection = value < 0 ? 1 : -1,
+      nextPage = makeAdjacentPage(nextDirection),
+      displayedX = nextPage ? value : value * 0.2,
+      width = surface.clientWidth || innerWidth;
+    direction = nextDirection;
+    adjacentPage = nextPage;
+    lastX = displayedX;
+    adjacentPages.forEach((page, pageDirection) => {
+      const active = page === nextPage;
+      page.classList.toggle("active-adjacent", active);
+      page.style.transform = active
+        ? `translate3d(${displayedX + nextDirection * width}px,0,0)`
+        : `translate3d(${pageDirection * 100}%,0,0)`;
+    });
+    currentPage.style.transform = `translate3d(${displayedX}px,0,0)`;
+  };
+  const flushDragFrame = () => {
+    if (!dragFrame) return;
+    cancelAnimationFrame(dragFrame);
+    paintDrag(pendingX);
+  };
   const clearDrag = () => {
+    if (dragFrame) cancelAnimationFrame(dragFrame);
+    dragFrame = 0;
     currentPage.style.transform = "";
     currentPage.classList.remove("dragging-page");
-    adjacentPage?.remove();
+    adjacentPages.forEach((page, pageDirection) => {
+      page.classList.remove("active-adjacent");
+      page.style.transform = `translate3d(${pageDirection * 100}%,0,0)`;
+    });
     adjacentPage = null;
     direction = 0;
     horizontal = false;
@@ -631,6 +666,7 @@ function pantryCategorySwipes() {
     if (surface.hasPointerCapture?.(pointerId))
       surface.releasePointerCapture(pointerId);
     if (!horizontal) return clearDrag();
+    flushDragFrame();
     const width = surface.clientWidth || innerWidth,
       elapsed = Math.max(performance.now() - startTime, 1),
       velocity = Math.abs(lastX) / elapsed,
@@ -649,8 +685,8 @@ function pantryCategorySwipes() {
       animations = [
         currentPage.animate(
           [
-            { transform: currentPage.style.transform || "translateX(0)" },
-            { transform: `translateX(${currentTarget}px)` },
+            { transform: currentPage.style.transform || "translate3d(0,0,0)" },
+            { transform: `translate3d(${currentTarget}px,0,0)` },
           ],
           options,
         ),
@@ -660,7 +696,7 @@ function pantryCategorySwipes() {
         adjacentPage.animate(
           [
             { transform: adjacentPage.style.transform },
-            { transform: `translateX(${adjacentTarget}px)` },
+            { transform: `translate3d(${adjacentTarget}px,0,0)` },
           ],
           options,
         ),
@@ -690,6 +726,7 @@ function pantryCategorySwipes() {
     startX = event.clientX;
     startY = event.clientY;
     lastX = 0;
+    pendingX = 0;
     startTime = performance.now();
     pointerId = event.pointerId;
     horizontal = false;
@@ -711,14 +748,8 @@ function pantryCategorySwipes() {
     }
     if (!horizontal) return;
     event.preventDefault();
-    const nextDirection = dx < 0 ? 1 : -1,
-      nextPage = makeAdjacentPage(nextDirection),
-      displayedX = nextPage ? dx : dx * 0.2,
-      width = surface.clientWidth || innerWidth;
-    lastX = displayedX;
-    currentPage.style.transform = `translateX(${displayedX}px)`;
-    if (nextPage)
-      nextPage.style.transform = `translateX(${displayedX + nextDirection * width}px)`;
+    pendingX = dx;
+    if (!dragFrame) dragFrame = requestAnimationFrame(() => paintDrag(pendingX));
   });
   surface.addEventListener("pointerup", finish);
   surface.addEventListener("pointercancel", finish);
@@ -731,8 +762,56 @@ function pantryCategorySwipes() {
     },
     true,
   );
+  const prepareAdjacentPages = () => {
+    if (!surface.isConnected || s.tab !== "pantry") return;
+    makeAdjacentPage(-1);
+    makeAdjacentPage(1);
+  };
+  if ("requestIdleCallback" in window)
+    requestIdleCallback(prepareAdjacentPages, { timeout: 220 });
+  else setTimeout(prepareAdjacentPages, 80);
+}
+function sameItems(a, b) {
+  if (a.length !== b.length) return false;
+  const previous = new Map(a.map((item) => [item.id, item]));
+  return b.every((item) => {
+    const old = previous.get(item.id);
+    return (
+      old &&
+      old.description === item.description &&
+      old.quantity === item.quantity &&
+      old.list === item.list &&
+      Boolean(old.completed) === Boolean(item.completed) &&
+      old.category === item.category
+    );
+  });
+}
+function sameLogs(a, b) {
+  if (a.length !== b.length) return false;
+  const previous = new Map(a.map((log) => [log.id, log]));
+  return b.every((log) => {
+    const old = previous.get(log.id);
+    return (
+      old &&
+      old.action === log.action &&
+      old.description === log.description &&
+      old.createdAt === log.createdAt &&
+      old.targetHistoryId === log.targetHistoryId
+    );
+  });
+}
+function scheduleRender() {
+  if (renderFrame) return;
+  renderFrame = requestAnimationFrame(() => {
+    renderFrame = 0;
+    render();
+  });
 }
 function render() {
+  if (renderFrame) {
+    cancelAnimationFrame(renderFrame);
+    renderFrame = 0;
+  }
   const previous = captureLayout();
   if (!s.authKnown && !PREVIEW) return gate();
   if (!s.actor && !PREVIEW) return gate();
@@ -840,7 +919,24 @@ async function toggle(x) {
       ...(x.completed ? { listAddedAt: Date.now() } : {}),
     });
     render();
-  } else await window.JamjarFirebase?.toggleBought(x);
+    return;
+  }
+  const next = {
+    ...x,
+    completed: !x.completed,
+    updatedAt: Date.now(),
+    ...(x.completed ? { listAddedAt: Date.now() } : {}),
+  };
+  s.items = s.items.map((item) => (item.id === x.id ? next : item));
+  render();
+  try {
+    await window.JamjarFirebase?.toggleBought(x);
+  } catch (error) {
+    console.error("Jamjar bought update failed", error);
+    s.items = s.items.map((item) => (item.id === x.id ? x : item));
+    s.status = "Couldn’t update that item. Try again.";
+    render();
+  }
 }
 async function move(x, to) {
   if (
@@ -863,37 +959,28 @@ async function move(x, to) {
       listAddedAt: Date.now(),
     });
     render();
-  } else await window.JamjarFirebase?.moveItem(x, to);
-}
-async function moveEditedPantryToGroceries() {
-  if (s.saving) return;
-  const x = s.items.find((item) => item.id === s.editId);
-  if (!x || x.list !== "pantry") return;
-  if (
-    s.items.some(
-      (item) =>
-        item.list === "grocery" &&
-        item.description.trim().toLowerCase() ===
-          x.description.trim().toLowerCase(),
-    )
-  ) {
-    s.error = `${x.description} is already in Groceries.`;
-    return render();
+    return true;
   }
-  s.saving = true;
-  const button = document.getElementById("moveToGroceries");
-  if (button) {
-    button.disabled = true;
-    button.textContent = "Moving…";
-  }
+  const next = {
+    ...x,
+    list: to,
+    completed: false,
+    quantity: "",
+    category: x.category || (to === "pantry" ? "Other" : ""),
+    listAddedAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+  s.items = s.items.map((item) => (item.id === x.id ? next : item));
+  render();
   try {
-    await move(x, "grocery");
-    close();
+    await window.JamjarFirebase?.moveItem(x, to);
+    return true;
   } catch (error) {
     console.error("Jamjar move failed", error);
-    s.saving = false;
-    s.error = "Jamjar couldn’t move that item. Try again.";
+    s.items = s.items.map((item) => (item.id === x.id ? x : item));
+    s.status = "Couldn’t move that item. Try again.";
     render();
+    return false;
   }
 }
 async function remove() {
@@ -960,6 +1047,8 @@ function swipes() {
     let start = 0,
       startY = 0,
       last = 0,
+      pending = 0,
+      paintFrame = 0,
       drag = false,
       horizontal = false,
       vertical = false;
@@ -973,6 +1062,9 @@ function swipes() {
       start = q.clientX;
       startY = q.clientY;
       last = 0;
+      pending = 0;
+      if (paintFrame) cancelAnimationFrame(paintFrame);
+      paintFrame = 0;
       drag = false;
       horizontal = false;
       vertical = false;
@@ -993,30 +1085,30 @@ function swipes() {
       if (!horizontal) return;
       q.preventDefault();
       last = next;
+      pending = next;
       drag = true;
       b.classList.add("dragging");
-      b.style.transform = `translateX(${next}px)`;
-      w.classList.toggle(
-        "swiping-right",
-        (x.list === "grocery" || x.list === "shopping") && next > 12,
-      );
-      w.classList.toggle(
-        "swiping-left",
-        next < -12,
-      );
-      const transfer =
-        x.list === "grocery" && next >= innerWidth * 0.5;
-      primary?.classList.toggle("is-transfer", transfer);
-      if (l)
-        l.textContent = transfer
-          ? "Move to Pantry"
-          : x.completed
-            ? "Restore"
-            : "Bought";
-      if (ii)
-        ii.innerHTML = I(transfer ? "archive" : "check");
+      if (!paintFrame)
+        paintFrame = requestAnimationFrame(() => {
+          paintFrame = 0;
+          const value = pending,
+            transfer = x.list === "grocery" && value >= innerWidth * 0.5;
+          b.style.transform = `translate3d(${value}px,0,0)`;
+          w.classList.toggle("swiping-right", value > 12);
+          w.classList.toggle("swiping-left", value < -12);
+          primary?.classList.toggle("is-transfer", transfer);
+          if (l)
+            l.textContent = transfer
+              ? "Move to Pantry"
+              : x.completed
+                ? "Restore"
+                : "Bought";
+          if (ii) ii.innerHTML = I(transfer ? "archive" : "check");
+        });
     };
     b.onpointerup = (q) => {
+      if (paintFrame) cancelAnimationFrame(paintFrame);
+      paintFrame = 0;
       if (b.hasPointerCapture(q.pointerId))
         b.releasePointerCapture(q.pointerId);
       b.classList.remove("dragging");
@@ -1043,6 +1135,8 @@ function swipes() {
       b.style.transform = "";
     };
     b.onpointercancel = () => {
+      if (paintFrame) cancelAnimationFrame(paintFrame);
+      paintFrame = 0;
       b.classList.remove("dragging");
       w.classList.remove("swiping-right", "swiping-left");
       b.style.transform = "";
@@ -1213,9 +1307,15 @@ function bind() {
     .getElementById("qty")
     ?.addEventListener("input", (q) => (s.qty = q.target.value));
   document.getElementById("save")?.addEventListener("click", save);
-  document
-    .getElementById("moveToGroceries")
-    ?.addEventListener("click", moveEditedPantryToGroceries);
+  document.querySelectorAll("[data-move-to-groceries]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const item = s.items.find(
+        (candidate) => candidate.id === button.dataset.moveToGroceries,
+      );
+      if (item) void move(item, "grocery");
+    });
+  });
   document.getElementById("cancel")?.addEventListener("click", () => close());
   document.getElementById("x")?.addEventListener("click", () => close());
   document.getElementById("delAsk")?.addEventListener("click", () => {
@@ -1269,14 +1369,21 @@ if (!PREVIEW) {
     render();
   });
   addEventListener("jamjar:data", (q) => {
-    s.items = q.detail.items || [];
-    s.logs = q.detail.history || [];
+    const nextItems = q.detail.items || [],
+      nextLogs = q.detail.history || [],
+      itemsChanged = !sameItems(s.items, nextItems),
+      logsChanged = !sameLogs(s.logs, nextLogs),
+      nextStatus = q.detail.fromCache
+        ? "Offline · changes will sync"
+        : "Up to date",
+      statusChanged = s.status !== nextStatus;
+    s.items = nextItems;
+    s.logs = nextLogs;
     if (s.undoPendingId && s.logs.some((log) => log.targetHistoryId === s.undoPendingId))
       s.undoPendingId = null;
-    s.status = q.detail.fromCache
-      ? "Offline · changes will sync"
-      : "Up to date";
-    render();
+    s.status = nextStatus;
+    if (itemsChanged || statusChanged || (logsChanged && (s.history || s.editor)))
+      scheduleRender();
   });
   addEventListener("jamjar:error", (q) => {
     s.status = q.detail || "Sync unavailable";
