@@ -17,6 +17,14 @@ const PANTRY_CATEGORIES = [
   "Other",
 ];
 const ITEM_CATEGORIES = PANTRY_CATEGORIES.slice(1);
+const PANTRY_PALETTES = {
+  "Snacks/Meals": ["#E34529", "#F9622F", "#FE8C00"],
+  Grains: PALETTES.pantry,
+  Baking: ["#4F341A", "#743F14", "#C97221"],
+  Spices: ["#D1351A", "#8F2400", "#713E1D"],
+  "Pet/Home": ["#0052E9", "#2F94F9", "#00C7FE"],
+  Other: ["#414C51", "#55636A", "#6A7C84"],
+};
 const samples = [
   {
     id: "s1",
@@ -162,8 +170,12 @@ const gradientColor = (colors, percent) =>
   percent <= 50
     ? mixColor(colors[0], colors[1], percent / 50)
     : mixColor(colors[1], colors[2], (percent - 50) / 50);
-const rowColors = (list, index, total) => {
-  const base = gradientColor(PALETTES[list], gradientPosition(index, total));
+const rowColors = (list, index, total, category = "Other") => {
+  const palette =
+    list === "pantry"
+      ? PANTRY_PALETTES[category] || PANTRY_PALETTES.Other
+      : PALETTES[list];
+  const base = gradientColor(palette, gradientPosition(index, total));
   return {
     top: mixColor(base, "#ffffff", 0.0225),
     bottom: mixColor(base, "#000000", 0.0225),
@@ -183,20 +195,35 @@ const listActive = (list) =>
     s.items
       .filter((x) => x.list === list && x.completed)
       .sort((a, b) => (a.updatedAt || 0) - (b.updatedAt || 0)),
-  pantry = () =>
-    s.items
+  pantry = () => {
+    const items = s.items
       .filter(
         (x) =>
           x.list === "pantry" &&
           (s.pantryCategory === "All" ||
             normalizedCategory(x.category) === s.pantryCategory) &&
           x.description.toLowerCase().includes(s.query.trim().toLowerCase()),
-      )
-      .sort(
+      );
+    if (s.pantryCategory !== "All") {
+      return items.sort(
         (a, b) =>
           (a.listAddedAt || a.createdAt || 0) -
           (b.listAddedAt || b.createdAt || 0),
       );
+    }
+    return items.sort((a, b) => {
+      const categoryOrder =
+        ITEM_CATEGORIES.indexOf(normalizedCategory(a.category)) -
+        ITEM_CATEGORIES.indexOf(normalizedCategory(b.category));
+      return (
+        categoryOrder ||
+        a.description.localeCompare(b.description, undefined, {
+          sensitivity: "base",
+          numeric: true,
+        })
+      );
+    });
+  };
 const itemSnapshot = (item) =>
   item
     ? {
@@ -314,7 +341,7 @@ const listLabel = (list) =>
   ({ grocery: "Groceries", pantry: "Pantry", shopping: "Shopping" })[list] ||
   "Jamjar";
 function row(x, i, n) {
-  const colors = rowColors(x.list, i, n);
+  const colors = rowColors(x.list, i, n, normalizedCategory(x.category));
   const actions =
     x.list === "grocery" || x.list === "shopping"
       ? `<div class="swipe-underlay primary"><span class="under-icon">${I("check")}</span><span class="under-label">${x.completed ? "Restore" : "Bought"}</span></div><div class="swipe-underlay delete"><span>${I("trash")} Delete</span></div>`
@@ -324,6 +351,22 @@ function row(x, i, n) {
       ? normalizedCategory(x.category)
       : x.quantity || "";
   return `<li class="swipe-wrap${x.completed ? " is-done" : ""}" data-id="${e(x.id)}">${actions}<button class="item-row" aria-label="Edit ${e(x.description)}" style="--band-top:${colors.top};--band-bottom:${colors.bottom}"><span class="item-copy"><span data-text="${e(x.description)}">${e(x.description)}</span>${metadata ? `<small>${e(metadata)}</small>` : ""}</span></button></li>`;
+}
+function pantryRows(items) {
+  const totals = new Map();
+  const positions = new Map();
+  items.forEach((item) => {
+    const category = normalizedCategory(item.category);
+    totals.set(category, (totals.get(category) || 0) + 1);
+  });
+  return items
+    .map((item) => {
+      const category = normalizedCategory(item.category);
+      const position = positions.get(category) || 0;
+      positions.set(category, position + 1);
+      return row(item, position, totals.get(category));
+    })
+    .join("");
 }
 function editor() {
   if (!s.editor) return "";
@@ -373,7 +416,7 @@ function app() {
     <header class="topbar"><div class="brand">${appIcon("brand-icon")}<span>Jamjar</span></div><span class="sync-status">${e(s.status)}</span></header>
     <main class="list-main">
       ${listMarkup("grocery", groceries, groceryDone, "Your grocery list is empty.")}
-      <section id="pantry-section" ${s.tab !== "pantry" ? "hidden" : ""}><div class="list-content"><div class="search-field">${I("search")}<label class="sr-only" for="search">Search Pantry</label><input id="search" value="${e(s.query)}" placeholder="Search">${s.query ? `<button type="button" class="search-clear" id="clearSearch" aria-label="Clear search">${I("x")}</button>` : ""}</div><nav class="pantry-categories" aria-label="Pantry categories">${categoryTabs}</nav><ul class="item-list">${p.map((x, i) => row(x, i, p.length)).join("")}${p.length ? "" : `<li class="empty-state">${s.query ? "No pantry items match." : s.pantryCategory === "All" ? "Your pantry is empty." : "No items in this category."}</li>`}</ul><div class="pantry-page-zone" aria-hidden="true"></div></div></section>
+      <section id="pantry-section" ${s.tab !== "pantry" ? "hidden" : ""}><div class="list-content"><div class="search-field">${I("search")}<label class="sr-only" for="search">Search Pantry</label><input id="search" value="${e(s.query)}" placeholder="Search">${s.query ? `<button type="button" class="search-clear" id="clearSearch" aria-label="Clear search">${I("x")}</button>` : ""}</div><nav class="pantry-categories" aria-label="Pantry categories">${categoryTabs}</nav><ul class="item-list">${pantryRows(p)}${p.length ? "" : `<li class="empty-state">${s.query ? "No pantry items match." : s.pantryCategory === "All" ? "Your pantry is empty." : "No items in this category."}</li>`}</ul><div class="pantry-page-zone" aria-hidden="true"></div></div></section>
       ${listMarkup("shopping", shopping, shoppingDone, "Your shopping list is empty.")}
       <section ${s.tab !== "settings" ? "hidden" : ""}><div class="settings-page"><button class="settings-row" id="hist"><span class="setting-icon">${I("history")}</span><span><strong>History Log</strong><small>See every change and who made it</small></span><span>›</span></button><div class="settings-row static"><span class="avatar">${e(initial)}</span><span><strong>${e(u.displayName || u.email || "")}</strong><small>${e(u.email || "")}</small></span></div>${s.install ? `<button class="settings-row" id="install"><span class="setting-icon">${I("package")}</span><span><strong>Install Jamjar</strong><small>Add it to this device</small></span><span>›</span></button>` : ""}<button class="settings-row danger-row" id="signout"><span class="setting-icon">${I("logout")}</span><span><strong>Sign out</strong><small>Keep shared data in Jamjar</small></span></button></div></section>
     </main>
