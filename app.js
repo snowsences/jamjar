@@ -6,6 +6,15 @@ const PALETTES = {
   grocery: ["#E32960", "#F9732F", "#FEA000"],
   pantry: ["#007DC2", "#00AB6C", "#8AD928"],
 };
+const PANTRY_CATEGORIES = [
+  "All",
+  "Pet/Home",
+  "Grains",
+  "Spices",
+  "Baking",
+  "Other",
+];
+const ITEM_CATEGORIES = PANTRY_CATEGORIES.slice(1);
 const samples = [
   {
     id: "s1",
@@ -37,6 +46,7 @@ const samples = [
     description: "San Marzano tomatoes",
     quantity: "4 cans",
     list: "pantry",
+    category: "Grains",
     createdAt: 4,
     updatedAt: 4,
   },
@@ -45,6 +55,7 @@ const samples = [
     description: "Fish sauce",
     quantity: "1 bottle",
     list: "pantry",
+    category: "Spices",
     createdAt: 3,
     updatedAt: 3,
   },
@@ -53,6 +64,7 @@ const samples = [
     description: "Dried chickpeas",
     quantity: "1 bag",
     list: "pantry",
+    category: "Grains",
     createdAt: 2,
     updatedAt: 2,
   },
@@ -68,6 +80,8 @@ const s = {
   ready: PREVIEW,
   history: false,
   query: "",
+  pantryCategory: "All",
+  itemCategory: "Other",
   editor: false,
   editId: null,
   desc: "",
@@ -77,8 +91,11 @@ const s = {
   del: false,
   status: PREVIEW ? "Preview data" : "Connecting…",
   install: false,
+  revealId: null,
+  oneHanded: false,
 };
 let installPrompt = null;
+let ignoreCategoryClickUntil = 0;
 const e = (x) =>
   String(x ?? "").replace(
     /[&<>"']/g,
@@ -108,8 +125,8 @@ const paths = {
 };
 const I = (n) =>
   `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">${paths[n] || ""}</svg>`;
-const jar = (x) =>
-  `<div class="jar-mark${x ? " small" : ""}" aria-hidden="true"><span></span></div>`;
+const appIcon = (className = "") =>
+  `<img class="app-icon ${className}" src="./icon-192.png" alt="">`;
 const mixColor = (from, to, amount) => {
   const a = from.match(/[\da-f]{2}/gi).map((v) => parseInt(v, 16)),
     b = to.match(/[\da-f]{2}/gi).map((v) => parseInt(v, 16));
@@ -138,22 +155,34 @@ const rowColors = (list, index, total) => {
     bottom: mixColor(base, "#000000", 0.0225),
   };
 };
+const normalizedCategory = (value) =>
+  ITEM_CATEGORIES.includes(value) ? value : "Other";
 const active = () =>
     s.items
       .filter((x) => x.list === "grocery" && !x.completed)
-      .sort((a, b) => b.createdAt - a.createdAt),
+      .sort(
+        (a, b) =>
+          (a.listAddedAt || a.createdAt || 0) -
+          (b.listAddedAt || b.createdAt || 0),
+      ),
   done = () =>
     s.items
       .filter((x) => x.list === "grocery" && x.completed)
-      .sort((a, b) => b.updatedAt - a.updatedAt),
+      .sort((a, b) => (a.updatedAt || 0) - (b.updatedAt || 0)),
   pantry = () =>
     s.items
       .filter(
         (x) =>
           x.list === "pantry" &&
+          (s.pantryCategory === "All" ||
+            normalizedCategory(x.category) === s.pantryCategory) &&
           x.description.toLowerCase().includes(s.query.trim().toLowerCase()),
       )
-      .sort((a, b) => a.description.localeCompare(b.description));
+      .sort(
+        (a, b) =>
+          (a.listAddedAt || a.createdAt || 0) -
+          (b.listAddedAt || b.createdAt || 0),
+      );
 function local(action, item, patch = {}) {
   const now = Date.now();
   if (action === "add") s.items = [{ ...item, ...patch }, ...s.items];
@@ -179,7 +208,7 @@ function local(action, item, patch = {}) {
   ];
 }
 function gate() {
-  root.innerHTML = `<main class="gate"><div class="gate-card">${jar()}<h1>Jamjar</h1>${!s.authKnown ? `<p>${s.ready ? "Sign in with Google to share your grocery list and pantry." : "Opening your lists…"}</p>` : ""}<button class="btn google-button" id="signin" ${!s.ready ? "disabled" : ""}>Sign in with Google</button>${s.authKnown ? `<small>${e(s.status)}</small>` : ""}</div></main>`;
+  root.innerHTML = `<main class="gate"><div class="gate-card">${appIcon("gate-icon")}<h1>Jamjar</h1>${!s.authKnown ? `<p>${s.ready ? "Sign in with Google to share your grocery list and pantry." : "Opening your lists…"}</p>` : ""}<button class="btn google-button" id="signin" ${!s.ready ? "disabled" : ""}>Sign in with Google</button>${s.authKnown ? `<small>${e(s.status)}</small>` : ""}</div></main>`;
   document
     .getElementById("signin")
     ?.addEventListener("click", () => window.JamjarFirebase?.signIn());
@@ -213,7 +242,13 @@ function editor() {
         ...s.logs.map((l) => l.description),
       ]),
     ].sort();
-  return `<div class="dialog-backdrop editor"><section class="dialog dialog-wrap" role="dialog" aria-modal="true"><button class="close-x" id="x" aria-label="Close editor">×</button><h2>${x ? "Edit item" : `Add to ${s.tab === "pantry" ? "Pantry" : "Grocery"}`}</h2><div class="form-stack"><label>Description<input id="desc" maxlength="120" list="suggestions" value="${e(s.desc)}" placeholder="What do you need?"></label><datalist id="suggestions">${opts.map((v) => `<option value="${e(v)}"></option>`).join("")}</datalist>${hasQuantity ? `<label>Quantity <span>Optional</span><input id="qty" maxlength="40" value="${e(s.qty)}" placeholder="2, 3 cans, 1 lb…"></label>` : ""}${s.error ? `<p class="form-error">${e(s.error)}</p>` : ""}</div><div class="dialog-actions">${x ? `<button class="btn ghost delete-button" id="delAsk">${I("trash")}Delete</button>` : ""}<button class="btn ghost" id="cancel">Cancel</button><button class="btn" id="save">Save</button></div></section></div>`;
+  const descriptionPlaceholder = hasQuantity
+    ? "What do you need?"
+    : "What do you have?";
+  const categorySelector = hasQuantity
+    ? ""
+    : `<div class="category-selector" role="group" aria-label="Category">${ITEM_CATEGORIES.map((category) => `<button type="button" class="category-choice${s.itemCategory === category ? " active" : ""}" data-item-category="${e(category)}" aria-pressed="${s.itemCategory === category}">${e(category)}</button>`).join("")}</div>`;
+  return `<div class="dialog-backdrop editor"><section class="dialog dialog-wrap" role="dialog" aria-modal="true"><button class="close-x" id="x" aria-label="Close editor">×</button><h2>${x ? "Edit item" : `Add to ${s.tab === "pantry" ? "Pantry" : "Grocery"}`}</h2><div class="form-stack"><label>Description<input id="desc" maxlength="120" list="suggestions" value="${e(s.desc)}" placeholder="${descriptionPlaceholder}"></label><datalist id="suggestions">${opts.map((v) => `<option value="${e(v)}"></option>`).join("")}</datalist>${categorySelector}${hasQuantity ? `<label>Quantity <span>Optional</span><input id="qty" maxlength="40" value="${e(s.qty)}" placeholder="2, 3 cans, 1 lb…"></label>` : ""}${s.error ? `<p class="form-error">${e(s.error)}</p>` : ""}</div><div class="dialog-actions">${x ? `<button class="btn ghost delete-button" id="delAsk">${I("trash")}Delete</button>` : ""}<button class="btn ghost" id="cancel">Cancel</button><button class="btn" id="save">Save</button></div></section></div>`;
 }
 function confirm() {
   if (s.clear) {
@@ -232,7 +267,11 @@ function app() {
     p = pantry(),
     u = s.actor || {},
     initial = (u.displayName?.[0] || u.email?.[0] || "?").toUpperCase();
-  root.innerHTML = `<div class="app-shell tab-${s.tab}"><header class="topbar"><div class="brand">${jar(1)}<span>Jamjar</span></div><span class="sync-status">${e(s.status)}</span></header><main class="list-main"><section id="grocery-section" ${s.tab !== "grocery" ? "hidden" : ""}><ul class="item-list">${a.map((x, i) => row(x, i, a.length)).join("")}${a.length ? "" : '<li class="empty-state">Your grocery list is empty.</li>'}${d.map((x, i) => row(x, i, d.length)).join("")}</ul>${d.length ? `<div class="clear-pull" id="clearPull" aria-hidden="true">${I("trash")}<span>Pull up to clear completed</span></div>` : ""}</section><section id="pantry-section" ${s.tab !== "pantry" ? "hidden" : ""}><label class="search-field">${I("search")}<span class="sr-only">Search Pantry</span><input id="search" value="${e(s.query)}" placeholder="Filter pantry"></label><ul class="item-list">${p.map((x, i) => row(x, i, p.length)).join("")}${p.length ? "" : `<li class="empty-state">${s.query ? "No pantry items match." : "Your pantry is empty."}</li>`}</ul></section><section ${s.tab !== "settings" ? "hidden" : ""}><div class="settings-page"><button class="settings-row" id="hist"><span class="setting-icon">${I("history")}</span><span><strong>History Log</strong><small>See every change and who made it</small></span><span>›</span></button><div class="settings-row static"><span class="avatar">${e(initial)}</span><span><strong>${e(u.displayName || u.email || "")}</strong><small>${e(u.email || "")}</small></span></div>${s.install ? `<button class="settings-row" id="install"><span class="setting-icon">${I("package")}</span><span><strong>Install Jamjar</strong><small>Add it to this device</small></span><span>›</span></button>` : ""}<button class="settings-row danger-row" id="signout"><span class="setting-icon">${I("logout")}</span><span><strong>Sign out</strong><small>Keep shared data in Jamjar</small></span></button></div></section></main>${s.tab !== "settings" ? `<button class="fab" id="add">${I("plus")}</button>` : ""}<nav class="bottom-tabs"><button class="tab-trigger ${s.tab === "grocery" ? "active" : ""}" data-tab="grocery">${I("basket")}<span>Grocery</span>${a.length ? `<b>${a.length}</b>` : ""}</button><button class="tab-trigger ${s.tab === "pantry" ? "active" : ""}" data-tab="pantry">${I("package")}<span>Pantry</span></button><button class="tab-trigger ${s.tab === "settings" ? "active" : ""}" data-tab="settings">${I("settings")}<span>Settings</span></button></nav></div>${editor()}${confirm()}`;
+  const categoryTabs = PANTRY_CATEGORIES.map(
+    (category) =>
+      `<button type="button" class="pantry-category-tab${s.pantryCategory === category ? " active" : ""}" data-pantry-category="${e(category)}" aria-pressed="${s.pantryCategory === category}">${e(category)}</button>`,
+  ).join("");
+  root.innerHTML = `<div class="app-shell tab-${s.tab}${s.oneHanded ? " one-handed" : ""}"><header class="topbar"><div class="brand">${appIcon("brand-icon")}<span>Jamjar</span></div><span class="sync-status">${e(s.status)}</span></header><main class="list-main"><section id="grocery-section" ${s.tab !== "grocery" ? "hidden" : ""}><div class="list-content"><ul class="item-list">${a.map((x, i) => row(x, i, a.length)).join("")}${a.length ? "" : '<li class="empty-state">Your grocery list is empty.</li>'}${d.map((x, i) => row(x, i, d.length)).join("")}</ul>${d.length ? `<div class="clear-pull" id="clearPull" aria-hidden="true">${I("trash")}<span>Pull up to clear completed</span></div>` : ""}</div></section><section id="pantry-section" ${s.tab !== "pantry" ? "hidden" : ""}><div class="list-content"><label class="search-field">${I("search")}<span class="sr-only">Search Pantry</span><input id="search" value="${e(s.query)}" placeholder="Search"></label><nav class="pantry-categories" aria-label="Pantry categories">${categoryTabs}</nav><ul class="item-list">${p.map((x, i) => row(x, i, p.length)).join("")}${p.length ? "" : `<li class="empty-state">${s.query ? "No pantry items match." : s.pantryCategory === "All" ? "Your pantry is empty." : "No items in this category."}</li>`}</ul></div></section><section ${s.tab !== "settings" ? "hidden" : ""}><div class="settings-page"><button class="settings-row" id="hist"><span class="setting-icon">${I("history")}</span><span><strong>History Log</strong><small>See every change and who made it</small></span><span>›</span></button><div class="settings-row static"><span class="avatar">${e(initial)}</span><span><strong>${e(u.displayName || u.email || "")}</strong><small>${e(u.email || "")}</small></span></div>${s.install ? `<button class="settings-row" id="install"><span class="setting-icon">${I("package")}</span><span><strong>Install Jamjar</strong><small>Add it to this device</small></span><span>›</span></button>` : ""}<button class="settings-row danger-row" id="signout"><span class="setting-icon">${I("logout")}</span><span><strong>Sign out</strong><small>Keep shared data in Jamjar</small></span></button></div></section></main>${s.tab !== "settings" ? `<button class="fab" id="add">${I("plus")}</button>` : ""}<nav class="bottom-tabs"><button class="tab-trigger ${s.tab === "grocery" ? "active" : ""}" data-tab="grocery">${I("basket")}<span>Grocery</span>${a.length ? `<b>${a.length}</b>` : ""}</button><button class="tab-trigger ${s.tab === "pantry" ? "active" : ""}" data-tab="pantry">${I("package")}<span>Pantry</span></button><button class="tab-trigger ${s.tab === "settings" ? "active" : ""}" data-tab="settings">${I("settings")}<span>Settings</span></button></nav></div>${editor()}${confirm()}`;
   bind();
 }
 function captureLayout() {
@@ -277,6 +316,98 @@ function animateLayout(previous) {
       );
   });
 }
+function revealPendingItem() {
+  if (!s.revealId) return;
+  const row = [...document.querySelectorAll(".swipe-wrap[data-id]")].find(
+    (item) => item.dataset.id === s.revealId,
+  );
+  if (!row) return;
+  s.revealId = null;
+  requestAnimationFrame(() =>
+    row.scrollIntoView({
+      behavior: matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? "auto"
+        : "smooth",
+      block: "end",
+    }),
+  );
+}
+function syncVisualViewport() {
+  const viewport = window.visualViewport,
+    height = viewport?.height || innerHeight,
+    top = viewport?.offsetTop || 0;
+  document.documentElement.style.setProperty(
+    "--visual-viewport-height",
+    `${Math.round(height)}px`,
+  );
+  document.documentElement.style.setProperty(
+    "--visual-viewport-top",
+    `${Math.round(top)}px`,
+  );
+}
+function scrollTabTop() {
+  requestAnimationFrame(() =>
+    scrollTo({
+      top: 0,
+      behavior: matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? "auto"
+        : "smooth",
+    }),
+  );
+}
+function pagePantryCategory(direction) {
+  const current = PANTRY_CATEGORIES.indexOf(s.pantryCategory),
+    next = Math.max(
+      0,
+      Math.min(PANTRY_CATEGORIES.length - 1, current + direction),
+    );
+  if (next === current) return;
+  s.pantryCategory = PANTRY_CATEGORIES[next];
+  render();
+  requestAnimationFrame(() => {
+    const activeTab = [...document.querySelectorAll(".pantry-category-tab")].find(
+      (tab) => tab.dataset.pantryCategory === s.pantryCategory,
+    );
+    activeTab?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+  });
+}
+function pantryCategorySwipes() {
+  const tabs = document.querySelector(".pantry-categories");
+  if (!tabs) return;
+  let startX = 0,
+    startY = 0,
+    startedAt = 0;
+  tabs.addEventListener(
+    "touchstart",
+    (event) => {
+      const touch = event.touches[0];
+      if (!touch) return;
+      startX = touch.clientX;
+      startY = touch.clientY;
+      startedAt = performance.now();
+    },
+    { passive: true },
+  );
+  tabs.addEventListener(
+    "touchend",
+    (event) => {
+      const touch = event.changedTouches[0];
+      if (!touch) return;
+      const dx = touch.clientX - startX,
+        dy = touch.clientY - startY,
+        elapsed = performance.now() - startedAt;
+      if (
+        Math.abs(dx) < 72 ||
+        Math.abs(dx) <= Math.abs(dy) * 1.25 ||
+        elapsed > 650
+      )
+        return;
+      ignoreCategoryClickUntil = performance.now() + 500;
+      pagePantryCategory(dx < 0 ? 1 : -1);
+    },
+    { passive: true },
+  );
+}
 function render() {
   const previous = captureLayout();
   if (!s.authKnown && !PREVIEW) return gate();
@@ -284,11 +415,17 @@ function render() {
   if (s.history) return renderHistory();
   app();
   animateLayout(previous);
+  revealPendingItem();
 }
 function open(x = null) {
   s.editId = x?.id || null;
   s.desc = x?.description || "";
   s.qty = x?.list === "pantry" ? "" : x?.quantity || "";
+  s.itemCategory = x
+    ? normalizedCategory(x.category)
+    : s.tab === "pantry" && s.pantryCategory !== "All"
+      ? s.pantryCategory
+      : "Other";
   s.error = "";
   s.editor = true;
   window.history.pushState({ editor: true }, "");
@@ -306,7 +443,8 @@ async function save() {
   const desc = s.desc.trim(),
     x = s.items.find((i) => i.id === s.editId),
     list = x?.list || (s.tab === "pantry" ? "pantry" : "grocery"),
-    qty = list === "pantry" ? "" : s.qty.trim();
+    qty = list === "pantry" ? "" : s.qty.trim(),
+    category = normalizedCategory(s.itemCategory);
   if (!desc) {
     s.error = "Add a description.";
     return render();
@@ -324,12 +462,11 @@ async function save() {
   }
   try {
     if (x) {
-      if (PREVIEW) local("updated", x, { description: desc, quantity: qty });
+      const patch = { description: desc, quantity: qty };
+      if (list === "pantry") patch.category = category;
+      if (PREVIEW) local("updated", x, patch);
       else
-        await window.JamjarFirebase?.updateItem(x.id, {
-          description: desc,
-          quantity: qty,
-        });
+        await window.JamjarFirebase?.updateItem(x.id, patch);
     } else {
       const n = {
         id: crypto.randomUUID(),
@@ -339,13 +476,18 @@ async function save() {
         completed: false,
         createdAt: Date.now(),
         updatedAt: Date.now(),
+        listAddedAt: Date.now(),
+        ...(list === "pantry" ? { category } : {}),
       };
+      s.revealId = n.id;
       if (PREVIEW) local("add", n);
       else
         await window.JamjarFirebase?.addItem({
+          id: n.id,
           description: desc,
           quantity: qty,
           list,
+          ...(list === "pantry" ? { category } : {}),
         });
     }
     close();
@@ -360,7 +502,10 @@ async function save() {
 }
 async function toggle(x) {
   if (PREVIEW) {
-    local(x.completed ? "restored" : "bought", x, { completed: !x.completed });
+    local(x.completed ? "restored" : "bought", x, {
+      completed: !x.completed,
+      ...(x.completed ? { listAddedAt: Date.now() } : {}),
+    });
     render();
   } else await window.JamjarFirebase?.toggleBought(x);
 }
@@ -381,6 +526,8 @@ async function move(x, to) {
       list: to,
       completed: false,
       quantity: "",
+      category: x.category || (to === "pantry" ? "Other" : ""),
+      listAddedAt: Date.now(),
     });
     render();
   } else await window.JamjarFirebase?.moveItem(x, to);
@@ -599,11 +746,43 @@ function bind() {
   document.querySelectorAll("[data-tab]").forEach(
     (b) =>
       (b.onclick = () => {
-        s.tab = b.dataset.tab;
+        const next = b.dataset.tab;
+        if (innerWidth <= 680 && next === s.tab && next !== "settings") {
+          s.oneHanded = !s.oneHanded;
+          render();
+          return scrollTabTop();
+        }
+        if (next === s.tab) return;
+        const mobile = innerWidth <= 680;
+        s.oneHanded = false;
+        s.tab = next;
         render();
+        if (mobile) scrollTabTop();
       }),
   );
   document.getElementById("add")?.addEventListener("click", () => open());
+  document.querySelectorAll("[data-pantry-category]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (performance.now() < ignoreCategoryClickUntil) return;
+      const scrollLeft = button.parentElement.scrollLeft;
+      s.pantryCategory = button.dataset.pantryCategory;
+      render();
+      requestAnimationFrame(() => {
+        const tabs = document.querySelector(".pantry-categories");
+        if (tabs) tabs.scrollLeft = scrollLeft;
+      });
+    });
+  });
+  document.querySelectorAll("[data-item-category]").forEach((button) => {
+    button.addEventListener("click", () => {
+      s.itemCategory = button.dataset.itemCategory;
+      document.querySelectorAll("[data-item-category]").forEach((choice) => {
+        const selected = choice.dataset.itemCategory === s.itemCategory;
+        choice.classList.toggle("active", selected);
+        choice.setAttribute("aria-pressed", String(selected));
+      });
+    });
+  });
   document.getElementById("hist")?.addEventListener("click", () => {
     s.history = true;
     window.history.pushState({ history: true }, "");
@@ -645,6 +824,7 @@ function bind() {
     render();
   });
   document.getElementById("delYes")?.addEventListener("click", remove);
+  pantryCategorySwipes();
   swipes();
   pullToClear();
 }
@@ -666,6 +846,10 @@ addEventListener("keydown", (event) => {
   event.preventDefault();
   close();
 });
+window.visualViewport?.addEventListener("resize", syncVisualViewport);
+window.visualViewport?.addEventListener("scroll", syncVisualViewport);
+addEventListener("resize", syncVisualViewport);
+syncVisualViewport();
 if (!PREVIEW) {
   addEventListener("jamjar:firebase-ready", () => {
     s.ready = true;
@@ -723,6 +907,7 @@ if (mc?.registerTool) {
           description: { type: "string", minLength: 1, maxLength: 120 },
           quantity: { type: "string", maxLength: 40 },
           list: { type: "string", enum: ["grocery", "pantry"] },
+          category: { type: "string", enum: ITEM_CATEGORIES },
         },
         required: ["description", "list"],
         additionalProperties: false,
@@ -741,25 +926,33 @@ if (mc?.registerTool) {
           )
         )
           throw Error("That item is already on the list.");
-        const quantity = list === "pantry" ? "" : v?.quantity?.trim() || "";
+        const quantity = list === "pantry" ? "" : v?.quantity?.trim() || "",
+          category = list === "pantry" ? normalizedCategory(v?.category) : "",
+          id = crypto.randomUUID(),
+          now = Date.now();
+        s.revealId = id;
         if (PREVIEW)
           local("add", {
-            id: crypto.randomUUID(),
+            id,
             description: d,
             quantity,
             list,
+            ...(list === "pantry" ? { category } : {}),
             completed: false,
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
+            createdAt: now,
+            updatedAt: now,
+            listAddedAt: now,
           });
         else
           await window.JamjarFirebase?.addItem({
+            id,
             description: d,
             quantity,
             list,
+            ...(list === "pantry" ? { category } : {}),
           });
         render();
-        return { added: d, list };
+        return { added: d, list, ...(list === "pantry" ? { category } : {}) };
       },
     },
     { signal: ac.signal },
@@ -786,7 +979,10 @@ if (mc?.registerTool) {
               (i) =>
                 i.list === "pantry" && i.description.toLowerCase().includes(q),
             )
-            .map((i) => ({ description: i.description })),
+            .map((i) => ({
+              description: i.description,
+              category: normalizedCategory(i.category),
+            })),
         };
       },
     },

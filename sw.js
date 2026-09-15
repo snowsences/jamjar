@@ -1,4 +1,4 @@
-const CACHE = "jamjar-shell-v9";
+const CACHE = "jamjar-shell-v12";
 const BASE = new URL("./", self.registration.scope).pathname;
 const ASSETS = [
   BASE,
@@ -6,7 +6,6 @@ const ASSETS = [
   `${BASE}styles.css`,
   `${BASE}app.js`,
   `${BASE}manifest.webmanifest`,
-  `${BASE}favicon.svg`,
   `${BASE}icon-192.png`,
   `${BASE}icon-512.png`,
   `${BASE}fonts/figtree-400.ttf`,
