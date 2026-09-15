@@ -158,6 +158,7 @@ strong {
 .gate-icon {
   width: 132px;
   height: 132px;
+  margin-inline: auto;
 }
 .sync-status {
   color: #9fb2bd;
@@ -483,6 +484,17 @@ strong {
 .pantry-page-zone {
   display: none;
 }
+.category-transitioning {
+  position: relative;
+  overflow-x: hidden;
+}
+.category-page-outgoing {
+  position: absolute;
+  z-index: 2;
+  left: 0;
+  width: 100%;
+  pointer-events: none;
+}
 .fab {
   position: fixed;
   z-index: 35;
@@ -690,16 +702,12 @@ strong {
   font-size: 54px;
   letter-spacing: -0.065em;
   margin: 26px 0 8px;
+  text-align: center;
 }
 .gate p {
   font-size: 18px;
   color: #c1d0d7;
   margin: 24px 0;
-}
-.gate small {
-  display: block;
-  color: #91a8b3;
-  margin-top: 18px;
 }
 .gate-bands {
   transform: rotate(-3deg);
@@ -855,6 +863,16 @@ strong {
   .app-shell.tab-pantry .list-content {
     transition: padding-top 240ms cubic-bezier(0.22, 1, 0.36, 1);
   }
+  .app-shell.tab-pantry .list-content {
+    min-height: calc(100dvh - 88px - env(safe-area-inset-bottom));
+    display: flex;
+    flex-direction: column;
+  }
+  .app-shell.tab-pantry .search-field,
+  .app-shell.tab-pantry .pantry-categories,
+  .app-shell.tab-pantry .item-list {
+    flex: 0 0 auto;
+  }
   .app-shell.one-handed.tab-grocery .list-content,
   .app-shell.one-handed.tab-pantry .list-content {
     padding-top: 50dvh;
@@ -864,7 +882,8 @@ strong {
   }
   .pantry-page-zone {
     display: block;
-    height: 128px;
+    flex: 1 0 128px;
+    min-height: 128px;
     touch-action: pan-y;
   }
   .topbar {

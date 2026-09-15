@@ -209,7 +209,7 @@ function local(action, item, patch = {}) {
   ];
 }
 function gate() {
-  root.innerHTML = `<main class="gate"><div class="gate-card">${appIcon("gate-icon")}<h1>Jamjar</h1>${!s.authKnown ? `<p>${s.ready ? "Sign in with Google to share your grocery list and pantry." : "Opening your lists…"}</p>` : ""}<button class="btn google-button" id="signin" ${!s.ready ? "disabled" : ""}>Sign in with Google</button>${s.authKnown ? `<small>${e(s.status)}</small>` : ""}</div></main>`;
+  root.innerHTML = `<main class="gate"><div class="gate-card">${appIcon("gate-icon")}<h1>Jamjar</h1>${!s.authKnown ? `<p>${s.ready ? "Sign in with Google to share your grocery list and pantry." : "Opening your lists…"}</p>` : ""}<button class="btn google-button" id="signin" ${!s.ready ? "disabled" : ""}>Sign in with Google</button></div></main>`;
   document
     .getElementById("signin")
     ?.addEventListener("click", () => window.JamjarFirebase?.signIn());
@@ -367,14 +367,59 @@ function pagePantryCategory(direction) {
       Math.min(PANTRY_CATEGORIES.length - 1, current + direction),
     );
   if (next === current) return;
+  const outgoing = document
+    .querySelector("#pantry-section .item-list")
+    ?.cloneNode(true);
   s.pantryCategory = PANTRY_CATEGORIES[next];
   s.query = "";
   render();
+  animatePantryPage(outgoing, direction);
   requestAnimationFrame(() => {
     const activeTab = [...document.querySelectorAll(".pantry-category-tab")].find(
       (tab) => tab.dataset.pantryCategory === s.pantryCategory,
     );
     activeTab?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+  });
+}
+function animatePantryPage(outgoing, direction) {
+  const incoming = document.querySelector("#pantry-section .item-list"),
+    host = incoming?.parentElement;
+  if (
+    !outgoing ||
+    !incoming ||
+    !host ||
+    !incoming.animate ||
+    matchMedia("(prefers-reduced-motion: reduce)").matches
+  )
+    return;
+  const forward = direction > 0,
+    easing = "cubic-bezier(0.37, 0, 0.63, 1)",
+    options = { duration: 300, easing, fill: "both" };
+  host.classList.add("category-transitioning");
+  outgoing.classList.add("category-page-outgoing");
+  outgoing.setAttribute("aria-hidden", "true");
+  outgoing.style.top = `${incoming.offsetTop}px`;
+  host.insertBefore(outgoing, incoming);
+  const outgoingAnimation = outgoing.animate(
+      [
+        { transform: "translateX(0)" },
+        { transform: `translateX(${forward ? "-100%" : "100%"})` },
+      ],
+      options,
+    ),
+    incomingAnimation = incoming.animate(
+      [
+        { transform: `translateX(${forward ? "100%" : "-100%"})` },
+        { transform: "translateX(0)" },
+      ],
+      options,
+    );
+  Promise.allSettled([
+    outgoingAnimation.finished,
+    incomingAnimation.finished,
+  ]).then(() => {
+    outgoing.remove();
+    host.classList.remove("category-transitioning");
   });
 }
 function pantryCategorySwipes() {
