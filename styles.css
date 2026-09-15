@@ -402,11 +402,34 @@ strong {
 }
 .search-field input {
   height: 49px;
-  padding: 0 14px 0 46px;
+  padding: 0 48px 0 46px;
   background: #20343f;
   border-color: #ffffff22;
   font-size: 16px;
   border-radius: 9px;
+}
+.search-clear {
+  position: absolute;
+  z-index: 2;
+  top: 3px;
+  right: 3px;
+  width: 43px;
+  height: 43px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #b8c8d0;
+}
+.search-clear .icon {
+  width: 19px;
+  height: 19px;
+}
+.search-clear:hover {
+  background: #ffffff0d;
+  color: #fff;
 }
 .pantry-categories {
   display: flex;
@@ -456,6 +479,9 @@ strong {
   border-color: #00ab6c;
   background: #007dc2;
   color: #fff;
+}
+.pantry-page-zone {
+  display: none;
 }
 .fab {
   position: fixed;
@@ -833,6 +859,14 @@ strong {
   .app-shell.one-handed.tab-pantry .list-content {
     padding-top: 50dvh;
   }
+  #pantry-section .item-list {
+    padding-bottom: 0;
+  }
+  .pantry-page-zone {
+    display: block;
+    height: 128px;
+    touch-action: pan-y;
+  }
   .topbar {
     height: calc(64px + env(safe-area-inset-top));
     padding: env(safe-area-inset-top) 22px 0;
@@ -865,6 +899,7 @@ strong {
       calc(22px + env(safe-area-inset-bottom));
     display: flex;
     flex-direction: column;
+    overflow-y: auto;
   }
   .dialog-backdrop.editor .form-stack {
     flex: 0 0 auto;
@@ -875,7 +910,6 @@ strong {
   .dialog-backdrop.editor .dialog-actions {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    margin-top: auto;
     flex: 0 0 auto;
   }
   .dialog-backdrop.editor .delete-button {

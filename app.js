@@ -8,10 +8,11 @@ const PALETTES = {
 };
 const PANTRY_CATEGORIES = [
   "All",
-  "Pet/Home",
+  "Snacks/Meals",
   "Grains",
-  "Spices",
   "Baking",
+  "Spices",
+  "Pet/Home",
   "Other",
 ];
 const ITEM_CATEGORIES = PANTRY_CATEGORIES.slice(1);
@@ -95,7 +96,6 @@ const s = {
   oneHanded: false,
 };
 let installPrompt = null;
-let ignoreCategoryClickUntil = 0;
 const e = (x) =>
   String(x ?? "").replace(
     /[&<>"']/g,
@@ -122,6 +122,7 @@ const paths = {
   basket:
     '<path d="M3 11h18l-2 9H5l-2-9Z"/><path d="m8 11 4-7 4 7"/><path d="M8 15v2M12 15v2M16 15v2"/>',
   trash: '<path d="M3 6h18M8 6V4h8v2m3 0-1 15H6L5 6M10 11v6M14 11v6"/>',
+  x: '<path d="M18 6 6 18M6 6l12 12"/>',
 };
 const I = (n) =>
   `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">${paths[n] || ""}</svg>`;
@@ -230,7 +231,11 @@ function row(x, i, n) {
     x.list === "grocery"
       ? `<div class="swipe-underlay primary"><span class="under-icon">${I("check")}</span><span class="under-label">${x.completed ? "Restore" : "Bought"}</span></div><div class="swipe-underlay delete"><span>${I("trash")} Delete</span></div>`
       : `<div class="swipe-underlay move from-right"><span class="under-icon">${I("basket")}</span><span class="under-label">Move to Grocery</span></div>`;
-  return `<li class="swipe-wrap${x.completed ? " is-done" : ""}" data-id="${e(x.id)}">${actions}<button class="item-row" aria-label="Edit ${e(x.description)}" style="--band-top:${colors.top};--band-bottom:${colors.bottom}"><span class="item-copy"><span data-text="${e(x.description)}">${e(x.description)}</span>${x.list === "grocery" && x.quantity ? `<small>${e(x.quantity)}</small>` : ""}</span></button></li>`;
+  const metadata =
+    x.list === "pantry"
+      ? normalizedCategory(x.category)
+      : x.quantity || "";
+  return `<li class="swipe-wrap${x.completed ? " is-done" : ""}" data-id="${e(x.id)}">${actions}<button class="item-row" aria-label="Edit ${e(x.description)}" style="--band-top:${colors.top};--band-bottom:${colors.bottom}"><span class="item-copy"><span data-text="${e(x.description)}">${e(x.description)}</span>${metadata ? `<small>${e(metadata)}</small>` : ""}</span></button></li>`;
 }
 function editor() {
   if (!s.editor) return "";
@@ -248,7 +253,7 @@ function editor() {
   const categorySelector = hasQuantity
     ? ""
     : `<div class="category-selector" role="group" aria-label="Category">${ITEM_CATEGORIES.map((category) => `<button type="button" class="category-choice${s.itemCategory === category ? " active" : ""}" data-item-category="${e(category)}" aria-pressed="${s.itemCategory === category}">${e(category)}</button>`).join("")}</div>`;
-  return `<div class="dialog-backdrop editor"><section class="dialog dialog-wrap" role="dialog" aria-modal="true"><button class="close-x" id="x" aria-label="Close editor">×</button><h2>${x ? "Edit item" : `Add to ${s.tab === "pantry" ? "Pantry" : "Grocery"}`}</h2><div class="form-stack"><label>Description<input id="desc" maxlength="120" list="suggestions" value="${e(s.desc)}" placeholder="${descriptionPlaceholder}"></label><datalist id="suggestions">${opts.map((v) => `<option value="${e(v)}"></option>`).join("")}</datalist>${categorySelector}${hasQuantity ? `<label>Quantity <span>Optional</span><input id="qty" maxlength="40" value="${e(s.qty)}" placeholder="2, 3 cans, 1 lb…"></label>` : ""}${s.error ? `<p class="form-error">${e(s.error)}</p>` : ""}</div><div class="dialog-actions">${x ? `<button class="btn ghost delete-button" id="delAsk">${I("trash")}Delete</button>` : ""}<button class="btn ghost" id="cancel">Cancel</button><button class="btn" id="save">Save</button></div></section></div>`;
+  return `<div class="dialog-backdrop editor"><section class="dialog dialog-wrap" role="dialog" aria-modal="true"><button class="close-x" id="x" aria-label="Close editor">×</button><h2>${x ? "Edit item" : `Add to ${s.tab === "pantry" ? "Pantry" : "Grocery"}`}</h2><div class="form-stack"><label>Description<input id="desc" maxlength="120" list="suggestions" value="${e(s.desc)}" placeholder="${descriptionPlaceholder}"></label><datalist id="suggestions">${opts.map((v) => `<option value="${e(v)}"></option>`).join("")}</datalist>${categorySelector}${hasQuantity ? `<label>Quantity <span>Optional</span><input id="qty" maxlength="40" value="${e(s.qty)}" placeholder="2, 3 cans, 1 lb…"></label>` : ""}${s.error ? `<p class="form-error">${e(s.error)}</p>` : ""}</div><div class="dialog-actions"><button class="btn ghost" id="cancel">Cancel</button><button class="btn" id="save">Save</button>${x ? `<button class="btn ghost delete-button" id="delAsk">${I("trash")}Delete</button>` : ""}</div></section></div>`;
 }
 function confirm() {
   if (s.clear) {
@@ -271,7 +276,7 @@ function app() {
     (category) =>
       `<button type="button" class="pantry-category-tab${s.pantryCategory === category ? " active" : ""}" data-pantry-category="${e(category)}" aria-pressed="${s.pantryCategory === category}">${e(category)}</button>`,
   ).join("");
-  root.innerHTML = `<div class="app-shell tab-${s.tab}${s.oneHanded ? " one-handed" : ""}"><header class="topbar"><div class="brand">${appIcon("brand-icon")}<span>Jamjar</span></div><span class="sync-status">${e(s.status)}</span></header><main class="list-main"><section id="grocery-section" ${s.tab !== "grocery" ? "hidden" : ""}><div class="list-content"><ul class="item-list">${a.map((x, i) => row(x, i, a.length)).join("")}${a.length ? "" : '<li class="empty-state">Your grocery list is empty.</li>'}${d.map((x, i) => row(x, i, d.length)).join("")}</ul>${d.length ? `<div class="clear-pull" id="clearPull" aria-hidden="true">${I("trash")}<span>Pull up to clear completed</span></div>` : ""}</div></section><section id="pantry-section" ${s.tab !== "pantry" ? "hidden" : ""}><div class="list-content"><label class="search-field">${I("search")}<span class="sr-only">Search Pantry</span><input id="search" value="${e(s.query)}" placeholder="Search"></label><nav class="pantry-categories" aria-label="Pantry categories">${categoryTabs}</nav><ul class="item-list">${p.map((x, i) => row(x, i, p.length)).join("")}${p.length ? "" : `<li class="empty-state">${s.query ? "No pantry items match." : s.pantryCategory === "All" ? "Your pantry is empty." : "No items in this category."}</li>`}</ul></div></section><section ${s.tab !== "settings" ? "hidden" : ""}><div class="settings-page"><button class="settings-row" id="hist"><span class="setting-icon">${I("history")}</span><span><strong>History Log</strong><small>See every change and who made it</small></span><span>›</span></button><div class="settings-row static"><span class="avatar">${e(initial)}</span><span><strong>${e(u.displayName || u.email || "")}</strong><small>${e(u.email || "")}</small></span></div>${s.install ? `<button class="settings-row" id="install"><span class="setting-icon">${I("package")}</span><span><strong>Install Jamjar</strong><small>Add it to this device</small></span><span>›</span></button>` : ""}<button class="settings-row danger-row" id="signout"><span class="setting-icon">${I("logout")}</span><span><strong>Sign out</strong><small>Keep shared data in Jamjar</small></span></button></div></section></main>${s.tab !== "settings" ? `<button class="fab" id="add">${I("plus")}</button>` : ""}<nav class="bottom-tabs"><button class="tab-trigger ${s.tab === "grocery" ? "active" : ""}" data-tab="grocery">${I("basket")}<span>Grocery</span>${a.length ? `<b>${a.length}</b>` : ""}</button><button class="tab-trigger ${s.tab === "pantry" ? "active" : ""}" data-tab="pantry">${I("package")}<span>Pantry</span></button><button class="tab-trigger ${s.tab === "settings" ? "active" : ""}" data-tab="settings">${I("settings")}<span>Settings</span></button></nav></div>${editor()}${confirm()}`;
+  root.innerHTML = `<div class="app-shell tab-${s.tab}${s.oneHanded ? " one-handed" : ""}"><header class="topbar"><div class="brand">${appIcon("brand-icon")}<span>Jamjar</span></div><span class="sync-status">${e(s.status)}</span></header><main class="list-main"><section id="grocery-section" ${s.tab !== "grocery" ? "hidden" : ""}><div class="list-content"><ul class="item-list">${a.map((x, i) => row(x, i, a.length)).join("")}${a.length ? "" : '<li class="empty-state">Your grocery list is empty.</li>'}${d.map((x, i) => row(x, i, d.length)).join("")}</ul>${d.length ? `<div class="clear-pull" id="clearPull" aria-hidden="true">${I("trash")}<span>Pull up to clear completed</span></div>` : ""}</div></section><section id="pantry-section" ${s.tab !== "pantry" ? "hidden" : ""}><div class="list-content"><div class="search-field">${I("search")}<label class="sr-only" for="search">Search Pantry</label><input id="search" value="${e(s.query)}" placeholder="Search">${s.query ? `<button type="button" class="search-clear" id="clearSearch" aria-label="Clear search">${I("x")}</button>` : ""}</div><nav class="pantry-categories" aria-label="Pantry categories">${categoryTabs}</nav><ul class="item-list">${p.map((x, i) => row(x, i, p.length)).join("")}${p.length ? "" : `<li class="empty-state">${s.query ? "No pantry items match." : s.pantryCategory === "All" ? "Your pantry is empty." : "No items in this category."}</li>`}</ul><div class="pantry-page-zone" aria-hidden="true"></div></div></section><section ${s.tab !== "settings" ? "hidden" : ""}><div class="settings-page"><button class="settings-row" id="hist"><span class="setting-icon">${I("history")}</span><span><strong>History Log</strong><small>See every change and who made it</small></span><span>›</span></button><div class="settings-row static"><span class="avatar">${e(initial)}</span><span><strong>${e(u.displayName || u.email || "")}</strong><small>${e(u.email || "")}</small></span></div>${s.install ? `<button class="settings-row" id="install"><span class="setting-icon">${I("package")}</span><span><strong>Install Jamjar</strong><small>Add it to this device</small></span><span>›</span></button>` : ""}<button class="settings-row danger-row" id="signout"><span class="setting-icon">${I("logout")}</span><span><strong>Sign out</strong><small>Keep shared data in Jamjar</small></span></button></div></section></main>${s.tab !== "settings" ? `<button class="fab" id="add">${I("plus")}</button>` : ""}<nav class="bottom-tabs"><button class="tab-trigger ${s.tab === "grocery" ? "active" : ""}" data-tab="grocery">${I("basket")}<span>Grocery</span>${a.length ? `<b>${a.length}</b>` : ""}</button><button class="tab-trigger ${s.tab === "pantry" ? "active" : ""}" data-tab="pantry">${I("package")}<span>Pantry</span></button><button class="tab-trigger ${s.tab === "settings" ? "active" : ""}" data-tab="settings">${I("settings")}<span>Settings</span></button></nav></div>${editor()}${confirm()}`;
   bind();
 }
 function captureLayout() {
@@ -363,6 +368,7 @@ function pagePantryCategory(direction) {
     );
   if (next === current) return;
   s.pantryCategory = PANTRY_CATEGORIES[next];
+  s.query = "";
   render();
   requestAnimationFrame(() => {
     const activeTab = [...document.querySelectorAll(".pantry-category-tab")].find(
@@ -372,12 +378,12 @@ function pagePantryCategory(direction) {
   });
 }
 function pantryCategorySwipes() {
-  const tabs = document.querySelector(".pantry-categories");
-  if (!tabs) return;
+  const zone = document.querySelector(".pantry-page-zone");
+  if (!zone || innerWidth > 680) return;
   let startX = 0,
     startY = 0,
     startedAt = 0;
-  tabs.addEventListener(
+  zone.addEventListener(
     "touchstart",
     (event) => {
       const touch = event.touches[0];
@@ -388,7 +394,7 @@ function pantryCategorySwipes() {
     },
     { passive: true },
   );
-  tabs.addEventListener(
+  zone.addEventListener(
     "touchend",
     (event) => {
       const touch = event.changedTouches[0];
@@ -402,7 +408,6 @@ function pantryCategorySwipes() {
         elapsed > 650
       )
         return;
-      ignoreCategoryClickUntil = performance.now() + 500;
       pagePantryCategory(dx < 0 ? 1 : -1);
     },
     { passive: true },
@@ -749,12 +754,15 @@ function bind() {
         const next = b.dataset.tab;
         if (innerWidth <= 680 && next === s.tab && next !== "settings") {
           s.oneHanded = !s.oneHanded;
-          render();
+          document
+            .querySelector(".app-shell")
+            ?.classList.toggle("one-handed", s.oneHanded);
           return scrollTabTop();
         }
         if (next === s.tab) return;
         const mobile = innerWidth <= 680;
         s.oneHanded = false;
+        s.query = "";
         s.tab = next;
         render();
         if (mobile) scrollTabTop();
@@ -763,9 +771,10 @@ function bind() {
   document.getElementById("add")?.addEventListener("click", () => open());
   document.querySelectorAll("[data-pantry-category]").forEach((button) => {
     button.addEventListener("click", () => {
-      if (performance.now() < ignoreCategoryClickUntil) return;
+      if (button.dataset.pantryCategory === s.pantryCategory) return;
       const scrollLeft = button.parentElement.scrollLeft;
       s.pantryCategory = button.dataset.pantryCategory;
+      s.query = "";
       render();
       requestAnimationFrame(() => {
         const tabs = document.querySelector(".pantry-categories");
@@ -796,10 +805,16 @@ function bind() {
     ?.addEventListener("click", () => window.JamjarFirebase?.signOut());
   document.getElementById("search")?.addEventListener("input", (q) => {
     s.query = q.target.value;
+    s.pantryCategory = "All";
     render();
     const z = document.getElementById("search");
     z?.focus();
     z?.setSelectionRange(s.query.length, s.query.length);
+  });
+  document.getElementById("clearSearch")?.addEventListener("click", () => {
+    s.query = "";
+    render();
+    document.getElementById("search")?.focus();
   });
   document
     .getElementById("desc")
