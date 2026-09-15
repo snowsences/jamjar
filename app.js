@@ -5,7 +5,7 @@ const PREVIEW = ["terminal.local", "localhost", "127.0.0.1"].includes(
 const PALETTES = {
   grocery: ["#E32960", "#F9732F", "#FEA000"],
   pantry: ["#007DC2", "#00AB6C", "#8AD928"],
-  shopping: ["#E32960", "#F9732F", "#FEA000"],
+  shopping: ["#8F29E3", "#E71AB4", "#FE0061"],
 };
 const PANTRY_CATEGORIES = [
   "All",
@@ -104,6 +104,7 @@ const s = {
   revealId: null,
   oneHanded: false,
   undoPendingId: null,
+  saving: false,
 };
 let installPrompt = null;
 const e = (x) =>
@@ -341,7 +342,7 @@ function editor() {
   const categorySelector = hasQuantity
     ? ""
     : `<div class="category-selector" role="group" aria-label="Category">${ITEM_CATEGORIES.map((category) => `<button type="button" class="category-choice${s.itemCategory === category ? " active" : ""}" data-item-category="${e(category)}" aria-pressed="${s.itemCategory === category}">${e(category)}</button>`).join("")}</div>`;
-  return `<div class="dialog-backdrop editor"><section class="dialog dialog-wrap" role="dialog" aria-modal="true"><button class="close-x" id="x" aria-label="Close editor">×</button><h2>${x ? "Edit item" : `Add to ${listLabel(editorList)}`}</h2><div class="form-stack"><label>Description<input id="desc" maxlength="120" list="suggestions" value="${e(s.desc)}" placeholder="${descriptionPlaceholder}"></label><datalist id="suggestions">${opts.map((v) => `<option value="${e(v)}"></option>`).join("")}</datalist>${categorySelector}${hasQuantity ? `<label>Quantity <span>Optional</span><input id="qty" maxlength="40" value="${e(s.qty)}" placeholder="2, 3 cans, 1 lb…"></label>` : ""}${s.error ? `<p class="form-error">${e(s.error)}</p>` : ""}</div><div class="dialog-actions"><button class="btn ghost" id="cancel">Cancel</button><button class="btn" id="save">Save</button>${x ? `<button class="btn ghost delete-button" id="delAsk">${I("trash")}Delete</button>` : ""}</div></section></div>`;
+  return `<div class="dialog-backdrop editor"><section class="dialog dialog-wrap" role="dialog" aria-modal="true"><button class="close-x" id="x" aria-label="Close editor">×</button><h2>${x ? "Edit item" : `Add to ${listLabel(editorList)}`}</h2><div class="form-stack"><label>Description<input id="desc" maxlength="120" list="suggestions" value="${e(s.desc)}" placeholder="${descriptionPlaceholder}"></label><datalist id="suggestions">${opts.map((v) => `<option value="${e(v)}"></option>`).join("")}</datalist>${categorySelector}${hasQuantity ? `<label>Quantity <span>Optional</span><input id="qty" maxlength="40" value="${e(s.qty)}" placeholder="2, 3 cans, 1 lb…"></label>` : ""}${s.error ? `<p class="form-error" role="alert">${e(s.error)}</p>` : ""}</div><div class="dialog-actions"><button class="btn ghost" id="cancel">Cancel</button><button class="btn" id="save" ${s.saving ? "disabled" : ""}>${s.saving ? "Saving…" : "Save"}</button>${x ? `<button class="btn ghost delete-button" id="delAsk">${I("trash")}Delete</button>` : ""}</div></section></div>`;
 }
 function confirm() {
   if (s.clearList) {
@@ -593,10 +594,12 @@ function close(fromPop = false) {
   s.editor = false;
   s.editId = null;
   s.error = "";
+  s.saving = false;
   if (!fromPop && window.history.state?.editor) window.history.back();
   render();
 }
 async function save() {
+  if (s.saving) return;
   const desc = s.desc.trim(),
     x = s.items.find((i) => i.id === s.editId),
     list = x?.list || s.tab,
@@ -616,6 +619,12 @@ async function save() {
   ) {
     s.error = `${desc} is already in ${listLabel(list)}.`;
     return render();
+  }
+  s.saving = true;
+  const saveButton = document.getElementById("save");
+  if (saveButton) {
+    saveButton.disabled = true;
+    saveButton.textContent = "Saving…";
   }
   try {
     if (x) {
@@ -650,6 +659,7 @@ async function save() {
     close();
   } catch (error) {
     console.error("Jamjar save failed", error);
+    s.saving = false;
     s.error =
       error?.code === "permission-denied"
         ? "Jamjar’s Firestore rules need to be published."

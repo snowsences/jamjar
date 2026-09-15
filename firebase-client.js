@@ -63,29 +63,54 @@ const itemSnapshot = (item) => ({
   updatedAt: item.updatedAt || Date.now(),
   listAddedAt: item.listAddedAt || item.createdAt || Date.now(),
 });
-const record = (batch, action, item, extra = {}) => {
-  const id = crypto.randomUUID();
-  batch.set(doc(historyRef, id), {
+const historyPayload = (action, item, extra = {}, enhanced = true) => ({
     action,
     description: item.description,
     quantity: item.quantity || "",
     fromList: item.list || "",
     toList: extra.toList || "",
     createdAt: Date.now(),
-    beforeItems: (extra.beforeItems || []).map(itemSnapshot),
-    afterItems: (extra.afterItems || []).map(itemSnapshot),
-    ...(extra.targetAction ? { targetAction: extra.targetAction } : {}),
-    ...(extra.targetHistoryId
-      ? { targetHistoryId: extra.targetHistoryId }
+    ...(enhanced
+      ? {
+          beforeItems: (extra.beforeItems || []).map(itemSnapshot),
+          afterItems: (extra.afterItems || []).map(itemSnapshot),
+          ...(extra.targetAction ? { targetAction: extra.targetAction } : {}),
+          ...(extra.targetHistoryId
+            ? { targetHistoryId: extra.targetHistoryId }
+            : {}),
+        }
       : {}),
     ...actor(),
-  });
+});
+const record = async (action, item, extra = {}) => {
+  const id = crypto.randomUUID();
+  try {
+    const batch = writeBatch(db);
+    batch.set(doc(historyRef, id), historyPayload(action, item, extra));
+    await batch.commit();
+  } catch (error) {
+    if (error?.code !== "permission-denied") {
+      console.warn("Jamjar history write failed", error);
+      return;
+    }
+    try {
+      const fallback = writeBatch(db);
+      fallback.set(
+        doc(historyRef, id),
+        historyPayload(action, item, extra, false),
+      );
+      await fallback.commit();
+    } catch (fallbackError) {
+      console.warn("Jamjar history fallback failed", fallbackError);
+    }
+  }
 };
-const commit = async (make) => {
+const commitItems = async (make, log) => {
   if (!auth.currentUser) throw Error("Sign in to save.");
   const batch = writeBatch(db);
   make(batch);
   await batch.commit();
+  if (log) void record(log.action, log.item, log.extra);
 };
 function emit(metadata) {
   window.JamjarData = {
@@ -147,118 +172,129 @@ onAuthStateChanged(auth, (user) => {
 window.JamjarFirebase = {
   signIn: () => signInWithPopup(auth, new GoogleAuthProvider()),
   signOut: () => signOut(auth),
-  addItem: (input) =>
-    commit((batch) => {
-      const id = input.id || crypto.randomUUID(),
-        now = Date.now(),
-        item = {
-          ...input,
-          id,
-          quantity: input.quantity || "",
-          completed: false,
-          createdAt: now,
-          updatedAt: now,
-          listAddedAt: now,
-        };
-      batch.set(doc(itemsRef, id), item);
-      record(batch, "added", item, { beforeItems: [], afterItems: [item] });
-    }),
-  updateItem: (id, input) =>
-    commit((batch) => {
-      const old = items.find((i) => i.id === id);
-      const next = {
+  addItem: (input) => {
+    const id = input.id || crypto.randomUUID(),
+      now = Date.now(),
+      item = {
+        ...input,
+        id,
+        quantity: input.quantity || "",
+        completed: false,
+        createdAt: now,
+        updatedAt: now,
+        listAddedAt: now,
+      };
+    return commitItems(
+      (batch) => batch.set(doc(itemsRef, id), item),
+      {
+        action: "added",
+        item,
+        extra: { beforeItems: [], afterItems: [item] },
+      },
+    );
+  },
+  updateItem: (id, input) => {
+    const old = items.find((i) => i.id === id),
+      next = {
         ...old,
         ...input,
         quantity: input.quantity || "",
         updatedAt: Date.now(),
       };
-      batch.set(doc(itemsRef, id), next);
-      record(batch, "updated", next, {
-        beforeItems: old ? [old] : [],
-        afterItems: [next],
-      });
-    }),
+    return commitItems(
+      (batch) => batch.set(doc(itemsRef, id), next),
+      {
+        action: "updated",
+        item: next,
+        extra: { beforeItems: old ? [old] : [], afterItems: [next] },
+      },
+    );
+  },
   deleteItem: (item) =>
-    commit((batch) => {
-      batch.delete(doc(itemsRef, item.id));
-      record(batch, "deleted", item, {
-        beforeItems: [item],
-        afterItems: [],
-      });
-    }),
-  toggleBought: (item) =>
-    commit((batch) => {
-      const next = {
-        ...item,
-        completed: !item.completed,
-        updatedAt: Date.now(),
-        ...(!item.completed ? {} : { listAddedAt: Date.now() }),
-      };
-      batch.set(doc(itemsRef, item.id), next);
-      record(batch, next.completed ? "bought" : "restored", item, {
-        beforeItems: [item],
-        afterItems: [next],
-      });
-    }),
-  moveItem: (item, toList) =>
-    commit((batch) => {
-      const next = {
-        ...item,
-        list: toList,
-        completed: false,
-        quantity: "",
-        category: item.category || (toList === "pantry" ? "Other" : ""),
-        listAddedAt: Date.now(),
-        updatedAt: Date.now(),
-      };
-      batch.set(doc(itemsRef, item.id), next);
-      record(
-        batch,
-        toList === "pantry" ? "moved_to_pantry" : "moved_to_grocery",
+    commitItems(
+      (batch) => batch.delete(doc(itemsRef, item.id)),
+      {
+        action: "deleted",
         item,
-        { toList, beforeItems: [item], afterItems: [next] },
-      );
-    }),
-  clearCompleted: (done, sourceList) =>
-    commit((batch) => {
+        extra: { beforeItems: [item], afterItems: [] },
+      },
+    ),
+  toggleBought: (item) => {
+    const next = {
+      ...item,
+      completed: !item.completed,
+      updatedAt: Date.now(),
+      ...(!item.completed ? {} : { listAddedAt: Date.now() }),
+    };
+    return commitItems(
+      (batch) => batch.set(doc(itemsRef, item.id), next),
+      {
+        action: next.completed ? "bought" : "restored",
+        item,
+        extra: { beforeItems: [item], afterItems: [next] },
+      },
+    );
+  },
+  moveItem: (item, toList) => {
+    const next = {
+      ...item,
+      list: toList,
+      completed: false,
+      quantity: "",
+      category: item.category || (toList === "pantry" ? "Other" : ""),
+      listAddedAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    return commitItems(
+      (batch) => batch.set(doc(itemsRef, item.id), next),
+      {
+        action:
+          toList === "pantry" ? "moved_to_pantry" : "moved_to_grocery",
+        item,
+        extra: { toList, beforeItems: [item], afterItems: [next] },
+      },
+    );
+  },
+  clearCompleted: (done, sourceList) => {
+    const item = {
+      description: `${done.length} completed ${done.length === 1 ? "item" : "items"}`,
+      quantity: "",
+      list: sourceList,
+    };
+    return commitItems((batch) => {
       done.forEach((item) => {
         batch.delete(doc(itemsRef, item.id));
       });
-      record(
-        batch,
-        "cleared_completed",
-        {
-          description: `${done.length} completed ${done.length === 1 ? "item" : "items"}`,
-          quantity: "",
-          list: sourceList,
-        },
-        { beforeItems: done, afterItems: [] },
-      );
-    }),
-  undoAction: (log) =>
-    commit((batch) => {
-      const before = (log.beforeItems || []).map(itemSnapshot),
-        after = (log.afterItems || []).map(itemSnapshot),
-        beforeIds = new Set(before.map((item) => item.id));
+    }, {
+      action: "cleared_completed",
+      item,
+      extra: { beforeItems: done, afterItems: [] },
+    });
+  },
+  undoAction: (log) => {
+    const before = (log.beforeItems || []).map(itemSnapshot),
+      after = (log.afterItems || []).map(itemSnapshot),
+      beforeIds = new Set(before.map((item) => item.id)),
+      item = {
+        description: log.description || "action",
+        quantity: "",
+        list: log.fromList || "",
+      };
+    return commitItems((batch) => {
       after.forEach((item) => {
         if (!beforeIds.has(item.id)) batch.delete(doc(itemsRef, item.id));
       });
       before.forEach((item) => batch.set(doc(itemsRef, item.id), item));
-      record(
-        batch,
-        "undid",
-        {
-          description: log.description || "action",
-          quantity: "",
-          list: log.fromList || "",
-        },
-        {
-          beforeItems: after,
-          afterItems: before,
-          targetAction: log.action || "changed",
-          targetHistoryId: log.id,
-        },
-      );
-    }),
+    }, {
+      action: "undid",
+      item,
+      extra: {
+        beforeItems: after,
+        afterItems: before,
+        targetAction: log.action || "changed",
+        targetHistoryId: log.id,
+      },
+    });
+  },
 };
 fire("firebase-ready");
