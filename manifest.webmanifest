@@ -1,7 +1,7 @@
 {
   "name": "Jamjar",
   "short_name": "Jamjar",
-  "description": "A shared grocery list and pantry tracker.",
+  "description": "Shared groceries, shopping, and pantry lists.",
   "start_url": "/jamjar/",
   "scope": "/jamjar/",
   "display": "standalone",

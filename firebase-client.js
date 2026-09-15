@@ -1,8 +1,9 @@
 import { initializeApp } from "./vendor/firebase-app.js";
 import {
-  getAuth,
-  setPersistence,
+  initializeAuth,
+  indexedDBLocalPersistence,
   browserLocalPersistence,
+  browserPopupRedirectResolver,
   GoogleAuthProvider,
   signInWithPopup,
   onAuthStateChanged,
@@ -27,8 +28,10 @@ const CONFIG = {
   appId: "1:281154655967:web:686cdccf976ee98d87bb6a",
 };
 const app = initializeApp(CONFIG, "jamjar");
-const auth = getAuth(app);
-await setPersistence(auth, browserLocalPersistence);
+const auth = initializeAuth(app, {
+  persistence: [indexedDBLocalPersistence, browserLocalPersistence],
+  popupRedirectResolver: browserPopupRedirectResolver,
+});
 const db = initializeFirestore(app, {
   localCache: persistentLocalCache({
     tabManager: persistentMultipleTabManager(),
@@ -49,6 +52,17 @@ const actor = () => ({
     auth.currentUser.email?.split("@")[0] ||
     "Someone",
 });
+const itemSnapshot = (item) => ({
+  id: item.id,
+  description: item.description || "",
+  quantity: item.quantity || "",
+  list: item.list || "grocery",
+  completed: Boolean(item.completed),
+  category: item.category || "",
+  createdAt: item.createdAt || Date.now(),
+  updatedAt: item.updatedAt || Date.now(),
+  listAddedAt: item.listAddedAt || item.createdAt || Date.now(),
+});
 const record = (batch, action, item, extra = {}) => {
   const id = crypto.randomUUID();
   batch.set(doc(historyRef, id), {
@@ -58,6 +72,12 @@ const record = (batch, action, item, extra = {}) => {
     fromList: item.list || "",
     toList: extra.toList || "",
     createdAt: Date.now(),
+    beforeItems: (extra.beforeItems || []).map(itemSnapshot),
+    afterItems: (extra.afterItems || []).map(itemSnapshot),
+    ...(extra.targetAction ? { targetAction: extra.targetAction } : {}),
+    ...(extra.targetHistoryId
+      ? { targetHistoryId: extra.targetHistoryId }
+      : {}),
     ...actor(),
   });
 };
@@ -141,7 +161,7 @@ window.JamjarFirebase = {
           listAddedAt: now,
         };
       batch.set(doc(itemsRef, id), item);
-      record(batch, "added", item);
+      record(batch, "added", item, { beforeItems: [], afterItems: [item] });
     }),
   updateItem: (id, input) =>
     commit((batch) => {
@@ -153,12 +173,18 @@ window.JamjarFirebase = {
         updatedAt: Date.now(),
       };
       batch.set(doc(itemsRef, id), next);
-      record(batch, "updated", next);
+      record(batch, "updated", next, {
+        beforeItems: old ? [old] : [],
+        afterItems: [next],
+      });
     }),
   deleteItem: (item) =>
     commit((batch) => {
       batch.delete(doc(itemsRef, item.id));
-      record(batch, "deleted", item);
+      record(batch, "deleted", item, {
+        beforeItems: [item],
+        afterItems: [],
+      });
     }),
   toggleBought: (item) =>
     commit((batch) => {
@@ -169,7 +195,10 @@ window.JamjarFirebase = {
         ...(!item.completed ? {} : { listAddedAt: Date.now() }),
       };
       batch.set(doc(itemsRef, item.id), next);
-      record(batch, next.completed ? "bought" : "restored", item);
+      record(batch, next.completed ? "bought" : "restored", item, {
+        beforeItems: [item],
+        afterItems: [next],
+      });
     }),
   moveItem: (item, toList) =>
     commit((batch) => {
@@ -187,15 +216,49 @@ window.JamjarFirebase = {
         batch,
         toList === "pantry" ? "moved_to_pantry" : "moved_to_grocery",
         item,
-        { toList },
+        { toList, beforeItems: [item], afterItems: [next] },
       );
     }),
-  clearCompleted: (done) =>
-    commit((batch) =>
+  clearCompleted: (done, sourceList) =>
+    commit((batch) => {
       done.forEach((item) => {
         batch.delete(doc(itemsRef, item.id));
-        record(batch, "cleared", item);
-      }),
-    ),
+      });
+      record(
+        batch,
+        "cleared_completed",
+        {
+          description: `${done.length} completed ${done.length === 1 ? "item" : "items"}`,
+          quantity: "",
+          list: sourceList,
+        },
+        { beforeItems: done, afterItems: [] },
+      );
+    }),
+  undoAction: (log) =>
+    commit((batch) => {
+      const before = (log.beforeItems || []).map(itemSnapshot),
+        after = (log.afterItems || []).map(itemSnapshot),
+        beforeIds = new Set(before.map((item) => item.id));
+      after.forEach((item) => {
+        if (!beforeIds.has(item.id)) batch.delete(doc(itemsRef, item.id));
+      });
+      before.forEach((item) => batch.set(doc(itemsRef, item.id), item));
+      record(
+        batch,
+        "undid",
+        {
+          description: log.description || "action",
+          quantity: "",
+          list: log.fromList || "",
+        },
+        {
+          beforeItems: after,
+          afterItems: before,
+          targetAction: log.action || "changed",
+          targetHistoryId: log.id,
+        },
+      );
+    }),
 };
 fire("firebase-ready");

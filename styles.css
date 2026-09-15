@@ -168,7 +168,8 @@ strong {
   width: min(800px, 100%);
   margin: 0 auto;
 }
-#grocery-section {
+#grocery-section,
+#shopping-section {
   min-height: calc(100dvh - 178px - env(safe-area-inset-bottom));
 }
 .list-content {
@@ -524,7 +525,7 @@ strong {
   height: calc(78px + env(safe-area-inset-bottom));
   padding: 4px 8px env(safe-area-inset-bottom);
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   background: #142630;
   border-top: 1px solid #ffffff18;
 }
@@ -676,9 +677,29 @@ strong {
   color: #8fcbd8;
   flex: none;
 }
-.history-list li > div {
+.history-copy {
+  min-width: 0;
+  flex: 1;
   display: grid;
   gap: 5px;
+}
+.history-undo {
+  flex: none;
+  min-width: 64px;
+  min-height: 40px;
+  margin: -2px 0;
+  padding: 0 13px;
+  border: 1px solid #ffffff28;
+  border-radius: 9px;
+  background: #294653;
+  color: #fff;
+  font-weight: 500;
+}
+.history-undo:hover {
+  background: #355867;
+}
+.history-undo:disabled {
+  opacity: 0.6;
 }
 .history-list strong {
   font-size: 16px;
@@ -833,7 +854,7 @@ strong {
   .bottom-tabs {
     left: 50%;
     right: auto;
-    width: 500px;
+    width: 640px;
     transform: translateX(-50%);
     border: 1px solid #ffffff18;
     border-bottom: 0;
@@ -852,15 +873,18 @@ strong {
 }
 @media (max-width: 680px) {
   .app-shell.tab-grocery .topbar,
-  .app-shell.tab-pantry .topbar {
+  .app-shell.tab-pantry .topbar,
+  .app-shell.tab-shopping .topbar {
     display: none;
   }
   .app-shell.tab-grocery #grocery-section,
-  .app-shell.tab-pantry #pantry-section {
+  .app-shell.tab-pantry #pantry-section,
+  .app-shell.tab-shopping #shopping-section {
     min-height: calc(100dvh - 88px - env(safe-area-inset-bottom));
   }
   .app-shell.tab-grocery .list-content,
-  .app-shell.tab-pantry .list-content {
+  .app-shell.tab-pantry .list-content,
+  .app-shell.tab-shopping .list-content {
     transition: padding-top 240ms cubic-bezier(0.22, 1, 0.36, 1);
   }
   .app-shell.tab-pantry .list-content {
@@ -874,7 +898,8 @@ strong {
     flex: 0 0 auto;
   }
   .app-shell.one-handed.tab-grocery .list-content,
-  .app-shell.one-handed.tab-pantry .list-content {
+  .app-shell.one-handed.tab-pantry .list-content,
+  .app-shell.one-handed.tab-shopping .list-content {
     padding-top: 50dvh;
   }
   #pantry-section .item-list {
