@@ -175,6 +175,11 @@ strong {
 .list-content {
   padding-top: 0;
 }
+#pantry-section .list-content {
+  min-height: calc(100dvh - 171px - env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+}
 .item-list {
   list-style: none;
   margin: 0;
@@ -242,10 +247,6 @@ strong {
 .swipe-underlay.is-transfer {
   background: #007dc2;
 }
-.swipe-underlay.from-right {
-  justify-content: flex-end;
-  background: #f9732f;
-}
 .swipe-underlay.delete {
   justify-content: flex-end;
   padding-right: 26px;
@@ -257,8 +258,7 @@ strong {
   gap: 8px;
 }
 .swipe-wrap.swiping-right .swipe-underlay.primary,
-.swipe-wrap.swiping-left .swipe-underlay.delete,
-.swipe-wrap.swiping-left .swipe-underlay.move {
+.swipe-wrap.swiping-left .swipe-underlay.delete {
   opacity: 1;
 }
 .swipe-underlay .icon {
@@ -386,6 +386,14 @@ strong {
   position: relative;
   display: block;
 }
+.pantry-controls {
+  position: sticky;
+  top: 76px;
+  z-index: 12;
+  display: flow-root;
+  flex: 0 0 auto;
+  background: #17242d;
+}
 .search-field > .icon {
   position: absolute;
   left: 15px;
@@ -482,8 +490,28 @@ strong {
   background: #007dc2;
   color: #fff;
 }
-.pantry-page-zone {
-  display: none;
+.pantry-page-surface {
+  position: relative;
+  flex: 1 0 auto;
+  min-height: 0;
+  overflow: hidden;
+  touch-action: pan-y;
+  background: #17242d;
+}
+.pantry-page {
+  min-height: 100%;
+  background: #17242d;
+  will-change: transform;
+}
+.pantry-page-adjacent {
+  position: absolute;
+  z-index: 3;
+  inset: 0;
+  width: 100%;
+}
+.pantry-page.dragging-page,
+.pantry-page-adjacent {
+  pointer-events: none;
 }
 .category-transitioning {
   position: relative;
@@ -831,6 +859,19 @@ strong {
   justify-content: center;
   color: #ffbdc6;
 }
+.dialog-actions.pantry-edit-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+.dialog-actions.pantry-edit-actions .delete-button {
+  grid-column: auto;
+  width: auto;
+  color: #ffbdc6;
+}
+.dialog-actions.pantry-edit-actions .lower-cancel,
+.dialog-actions.pantry-edit-actions .delete-button {
+  margin-top: 6px;
+}
 .close-x {
   position: absolute;
   right: 18px;
@@ -889,13 +930,9 @@ strong {
   }
   .app-shell.tab-pantry .list-content {
     min-height: calc(100dvh - 88px - env(safe-area-inset-bottom));
-    display: flex;
-    flex-direction: column;
   }
-  .app-shell.tab-pantry .search-field,
-  .app-shell.tab-pantry .pantry-categories,
-  .app-shell.tab-pantry .item-list {
-    flex: 0 0 auto;
+  .app-shell.tab-pantry .pantry-controls {
+    top: 0;
   }
   .app-shell.one-handed.tab-grocery .list-content,
   .app-shell.one-handed.tab-pantry .list-content,
@@ -904,12 +941,6 @@ strong {
   }
   #pantry-section .item-list {
     padding-bottom: 0;
-  }
-  .pantry-page-zone {
-    display: block;
-    flex: 1 0 128px;
-    min-height: 128px;
-    touch-action: pan-y;
   }
   .topbar {
     height: calc(64px + env(safe-area-inset-top));

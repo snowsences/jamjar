@@ -195,16 +195,15 @@ const listActive = (list) =>
     s.items
       .filter((x) => x.list === list && x.completed)
       .sort((a, b) => (a.updatedAt || 0) - (b.updatedAt || 0)),
-  pantry = () => {
+  pantryItems = (category = s.pantryCategory, query = s.query) => {
     const items = s.items
       .filter(
         (x) =>
           x.list === "pantry" &&
-          (s.pantryCategory === "All" ||
-            normalizedCategory(x.category) === s.pantryCategory) &&
-          x.description.toLowerCase().includes(s.query.trim().toLowerCase()),
+          (category === "All" || normalizedCategory(x.category) === category) &&
+          x.description.toLowerCase().includes(query.trim().toLowerCase()),
       );
-    if (s.pantryCategory !== "All") {
+    if (category !== "All") {
       return items.sort(
         (a, b) =>
           (a.listAddedAt || a.createdAt || 0) -
@@ -223,7 +222,8 @@ const listActive = (list) =>
         })
       );
     });
-  };
+  },
+  pantry = () => pantryItems();
 const itemSnapshot = (item) =>
   item
     ? {
@@ -345,7 +345,7 @@ function row(x, i, n) {
   const actions =
     x.list === "grocery" || x.list === "shopping"
       ? `<div class="swipe-underlay primary"><span class="under-icon">${I("check")}</span><span class="under-label">${x.completed ? "Restore" : "Bought"}</span></div><div class="swipe-underlay delete"><span>${I("trash")} Delete</span></div>`
-      : `<div class="swipe-underlay move from-right"><span class="under-icon">${I("basket")}</span><span class="under-label">Move to Groceries</span></div>`;
+      : "";
   const metadata =
     x.list === "pantry"
       ? normalizedCategory(x.category)
@@ -368,6 +368,9 @@ function pantryRows(items) {
     })
     .join("");
 }
+function pantryPage(items, emptyText) {
+  return `<div class="pantry-page"><ul class="item-list">${pantryRows(items)}${items.length ? "" : `<li class="empty-state">${emptyText}</li>`}</ul></div>`;
+}
 function editor() {
   if (!s.editor) return "";
   const x = s.items.find((i) => i.id === s.editId),
@@ -385,7 +388,11 @@ function editor() {
   const categorySelector = hasQuantity
     ? ""
     : `<div class="category-selector" role="group" aria-label="Category">${ITEM_CATEGORIES.map((category) => `<button type="button" class="category-choice${s.itemCategory === category ? " active" : ""}" data-item-category="${e(category)}" aria-pressed="${s.itemCategory === category}">${e(category)}</button>`).join("")}</div>`;
-  return `<div class="dialog-backdrop editor"><section class="dialog dialog-wrap" role="dialog" aria-modal="true"><button class="close-x" id="x" aria-label="Close editor">×</button><h2>${x ? "Edit item" : `Add to ${listLabel(editorList)}`}</h2><div class="form-stack"><label>Description<input id="desc" maxlength="120" list="suggestions" value="${e(s.desc)}" placeholder="${descriptionPlaceholder}"></label><datalist id="suggestions">${opts.map((v) => `<option value="${e(v)}"></option>`).join("")}</datalist>${categorySelector}${hasQuantity ? `<label>Quantity <span>Optional</span><input id="qty" maxlength="40" value="${e(s.qty)}" placeholder="2, 3 cans, 1 lb…"></label>` : ""}${s.error ? `<p class="form-error" role="alert">${e(s.error)}</p>` : ""}</div><div class="dialog-actions"><button class="btn ghost" id="cancel">Cancel</button><button class="btn" id="save" ${s.saving ? "disabled" : ""}>${s.saving ? "Saving…" : "Save"}</button>${x ? `<button class="btn ghost delete-button" id="delAsk">${I("trash")}Delete</button>` : ""}</div></section></div>`;
+  const pantryEdit = Boolean(x && editorList === "pantry"),
+    actions = pantryEdit
+      ? `<div class="dialog-actions pantry-edit-actions"><button class="btn ghost move-to-groceries" id="moveToGroceries" ${s.saving ? "disabled" : ""}>Add to Groceries</button><button class="btn" id="save" ${s.saving ? "disabled" : ""}>${s.saving ? "Saving…" : "Save"}</button><button class="btn ghost lower-cancel" id="cancel">Cancel</button><button class="btn ghost delete-button" id="delAsk">${I("trash")}Delete</button></div>`
+      : `<div class="dialog-actions"><button class="btn ghost" id="cancel">Cancel</button><button class="btn" id="save" ${s.saving ? "disabled" : ""}>${s.saving ? "Saving…" : "Save"}</button>${x ? `<button class="btn ghost delete-button" id="delAsk">${I("trash")}Delete</button>` : ""}</div>`;
+  return `<div class="dialog-backdrop editor"><section class="dialog dialog-wrap" role="dialog" aria-modal="true"><button class="close-x" id="x" aria-label="Close editor">×</button><h2>${x ? "Edit item" : `Add to ${listLabel(editorList)}`}</h2><div class="form-stack"><label>Description<input id="desc" maxlength="120" list="suggestions" value="${e(s.desc)}" placeholder="${descriptionPlaceholder}"></label><datalist id="suggestions">${opts.map((v) => `<option value="${e(v)}"></option>`).join("")}</datalist>${categorySelector}${hasQuantity ? `<label>Quantity <span>Optional</span><input id="qty" maxlength="40" value="${e(s.qty)}" placeholder="2, 3 cans, 1 lb…"></label>` : ""}${s.error ? `<p class="form-error" role="alert">${e(s.error)}</p>` : ""}</div>${actions}</section></div>`;
 }
 function confirm() {
   if (s.clearList) {
@@ -416,7 +423,7 @@ function app() {
     <header class="topbar"><div class="brand">${appIcon("brand-icon")}<span>Jamjar</span></div><span class="sync-status">${e(s.status)}</span></header>
     <main class="list-main">
       ${listMarkup("grocery", groceries, groceryDone, "Your grocery list is empty.")}
-      <section id="pantry-section" ${s.tab !== "pantry" ? "hidden" : ""}><div class="list-content"><div class="search-field">${I("search")}<label class="sr-only" for="search">Search Pantry</label><input id="search" value="${e(s.query)}" placeholder="Search">${s.query ? `<button type="button" class="search-clear" id="clearSearch" aria-label="Clear search">${I("x")}</button>` : ""}</div><nav class="pantry-categories" aria-label="Pantry categories">${categoryTabs}</nav><ul class="item-list">${pantryRows(p)}${p.length ? "" : `<li class="empty-state">${s.query ? "No pantry items match." : s.pantryCategory === "All" ? "Your pantry is empty." : "No items in this category."}</li>`}</ul><div class="pantry-page-zone" aria-hidden="true"></div></div></section>
+      <section id="pantry-section" ${s.tab !== "pantry" ? "hidden" : ""}><div class="list-content"><div class="pantry-controls"><div class="search-field">${I("search")}<label class="sr-only" for="search">Search Pantry</label><input id="search" value="${e(s.query)}" placeholder="Search">${s.query ? `<button type="button" class="search-clear" id="clearSearch" aria-label="Clear search">${I("x")}</button>` : ""}</div><nav class="pantry-categories" aria-label="Pantry categories">${categoryTabs}</nav></div><div class="pantry-page-surface">${pantryPage(p, s.query ? "No pantry items match." : s.pantryCategory === "All" ? "Your pantry is empty." : "No items in this category.")}</div></div></section>
       ${listMarkup("shopping", shopping, shoppingDone, "Your shopping list is empty.")}
       <section ${s.tab !== "settings" ? "hidden" : ""}><div class="settings-page"><button class="settings-row" id="hist"><span class="setting-icon">${I("history")}</span><span><strong>History Log</strong><small>See every change and who made it</small></span><span>›</span></button><div class="settings-row static"><span class="avatar">${e(initial)}</span><span><strong>${e(u.displayName || u.email || "")}</strong><small>${e(u.email || "")}</small></span></div>${s.install ? `<button class="settings-row" id="install"><span class="setting-icon">${I("package")}</span><span><strong>Install Jamjar</strong><small>Add it to this device</small></span><span>›</span></button>` : ""}<button class="settings-row danger-row" id="signout"><span class="setting-icon">${I("logout")}</span><span><strong>Sign out</strong><small>Keep shared data in Jamjar</small></span></button></div></section>
     </main>
@@ -519,7 +526,7 @@ function pagePantryCategory(direction) {
     );
   if (next === current) return;
   const outgoing = document
-    .querySelector("#pantry-section .item-list")
+    .querySelector("#pantry-section .pantry-page")
     ?.cloneNode(true);
   s.pantryCategory = PANTRY_CATEGORIES[next];
   s.query = "";
@@ -533,7 +540,7 @@ function pagePantryCategory(direction) {
   });
 }
 function animatePantryPage(outgoing, direction) {
-  const incoming = document.querySelector("#pantry-section .item-list"),
+  const incoming = document.querySelector("#pantry-section .pantry-page"),
     host = incoming?.parentElement;
   if (
     !outgoing ||
@@ -574,39 +581,155 @@ function animatePantryPage(outgoing, direction) {
   });
 }
 function pantryCategorySwipes() {
-  const zone = document.querySelector(".pantry-page-zone");
-  if (!zone || innerWidth > 680) return;
+  const surface = document.querySelector(".pantry-page-surface"),
+    currentPage = surface?.querySelector(".pantry-page");
+  if (!surface || !currentPage) return;
   let startX = 0,
     startY = 0,
-    startedAt = 0;
-  zone.addEventListener(
-    "touchstart",
+    startTime = 0,
+    lastX = 0,
+    pointerId = null,
+    horizontal = false,
+    vertical = false,
+    adjacentPage = null,
+    direction = 0,
+    suppressClickUntil = 0;
+  const categoryIndex = () => PANTRY_CATEGORIES.indexOf(s.pantryCategory);
+  const makeAdjacentPage = (nextDirection) => {
+    const nextIndex = categoryIndex() + nextDirection;
+    if (nextIndex < 0 || nextIndex >= PANTRY_CATEGORIES.length) {
+      adjacentPage?.remove();
+      adjacentPage = null;
+      direction = nextDirection;
+      return null;
+    }
+    if (adjacentPage && direction === nextDirection) return adjacentPage;
+    adjacentPage?.remove();
+    direction = nextDirection;
+    const category = PANTRY_CATEGORIES[nextIndex],
+      items = pantryItems(category, ""),
+      holder = document.createElement("div");
+    holder.className = "pantry-page pantry-page-adjacent";
+    holder.innerHTML = `<ul class="item-list">${pantryRows(items)}${items.length ? "" : `<li class="empty-state">${category === "All" ? "Your pantry is empty." : "No items in this category."}</li>`}</ul>`;
+    holder.style.transform = `translateX(${nextDirection * surface.clientWidth}px)`;
+    surface.append(holder);
+    adjacentPage = holder;
+    return holder;
+  };
+  const clearDrag = () => {
+    currentPage.style.transform = "";
+    currentPage.classList.remove("dragging-page");
+    adjacentPage?.remove();
+    adjacentPage = null;
+    direction = 0;
+    horizontal = false;
+    vertical = false;
+    pointerId = null;
+  };
+  const finish = (event) => {
+    if (event.pointerId !== pointerId) return;
+    if (surface.hasPointerCapture?.(pointerId))
+      surface.releasePointerCapture(pointerId);
+    if (!horizontal) return clearDrag();
+    const width = surface.clientWidth || innerWidth,
+      elapsed = Math.max(performance.now() - startTime, 1),
+      velocity = Math.abs(lastX) / elapsed,
+      commit =
+        Boolean(adjacentPage) &&
+        (Math.abs(lastX) >= width * 0.22 || velocity >= 0.55),
+      reduced = matchMedia("(prefers-reduced-motion: reduce)").matches,
+      currentTarget = commit ? -direction * width : 0,
+      adjacentTarget = commit ? 0 : direction * width,
+      duration = reduced ? 0 : commit ? 260 : 220,
+      options = {
+        duration,
+        easing: "cubic-bezier(0.37, 0, 0.63, 1)",
+        fill: "forwards",
+      },
+      animations = [
+        currentPage.animate(
+          [
+            { transform: currentPage.style.transform || "translateX(0)" },
+            { transform: `translateX(${currentTarget}px)` },
+          ],
+          options,
+        ),
+      ];
+    if (adjacentPage)
+      animations.push(
+        adjacentPage.animate(
+          [
+            { transform: adjacentPage.style.transform },
+            { transform: `translateX(${adjacentTarget}px)` },
+          ],
+          options,
+        ),
+      );
+    Promise.allSettled(animations.map((animation) => animation.finished)).then(
+      () => {
+        if (!commit) return clearDrag();
+        s.pantryCategory = PANTRY_CATEGORIES[categoryIndex() + direction];
+        s.query = "";
+        render();
+        requestAnimationFrame(() => {
+          const activeTab = [...document.querySelectorAll(".pantry-category-tab")].find(
+            (tab) => tab.dataset.pantryCategory === s.pantryCategory,
+          );
+          activeTab?.scrollIntoView({
+            behavior: reduced ? "auto" : "smooth",
+            block: "nearest",
+            inline: "center",
+          });
+        });
+      },
+    );
+  };
+  surface.addEventListener("pointerdown", (event) => {
+    if (!event.isPrimary || (event.pointerType === "mouse" && event.button !== 0))
+      return;
+    startX = event.clientX;
+    startY = event.clientY;
+    lastX = 0;
+    startTime = performance.now();
+    pointerId = event.pointerId;
+    horizontal = false;
+    vertical = false;
+  });
+  surface.addEventListener("pointermove", (event) => {
+    if (event.pointerId !== pointerId || vertical) return;
+    const dx = event.clientX - startX,
+      dy = event.clientY - startY;
+    if (!horizontal && Math.abs(dy) > 8 && Math.abs(dy) > Math.abs(dx)) {
+      vertical = true;
+      return;
+    }
+    if (!horizontal && Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy)) {
+      horizontal = true;
+      suppressClickUntil = performance.now() + 500;
+      surface.setPointerCapture?.(pointerId);
+      currentPage.classList.add("dragging-page");
+    }
+    if (!horizontal) return;
+    event.preventDefault();
+    const nextDirection = dx < 0 ? 1 : -1,
+      nextPage = makeAdjacentPage(nextDirection),
+      displayedX = nextPage ? dx : dx * 0.2,
+      width = surface.clientWidth || innerWidth;
+    lastX = displayedX;
+    currentPage.style.transform = `translateX(${displayedX}px)`;
+    if (nextPage)
+      nextPage.style.transform = `translateX(${displayedX + nextDirection * width}px)`;
+  });
+  surface.addEventListener("pointerup", finish);
+  surface.addEventListener("pointercancel", finish);
+  surface.addEventListener(
+    "click",
     (event) => {
-      const touch = event.touches[0];
-      if (!touch) return;
-      startX = touch.clientX;
-      startY = touch.clientY;
-      startedAt = performance.now();
+      if (performance.now() >= suppressClickUntil) return;
+      event.preventDefault();
+      event.stopPropagation();
     },
-    { passive: true },
-  );
-  zone.addEventListener(
-    "touchend",
-    (event) => {
-      const touch = event.changedTouches[0];
-      if (!touch) return;
-      const dx = touch.clientX - startX,
-        dy = touch.clientY - startY,
-        elapsed = performance.now() - startedAt;
-      if (
-        Math.abs(dx) < 72 ||
-        Math.abs(dx) <= Math.abs(dy) * 1.25 ||
-        elapsed > 650
-      )
-        return;
-      pagePantryCategory(dx < 0 ? 1 : -1);
-    },
-    { passive: true },
+    true,
   );
 }
 function render() {
@@ -742,6 +865,37 @@ async function move(x, to) {
     render();
   } else await window.JamjarFirebase?.moveItem(x, to);
 }
+async function moveEditedPantryToGroceries() {
+  if (s.saving) return;
+  const x = s.items.find((item) => item.id === s.editId);
+  if (!x || x.list !== "pantry") return;
+  if (
+    s.items.some(
+      (item) =>
+        item.list === "grocery" &&
+        item.description.trim().toLowerCase() ===
+          x.description.trim().toLowerCase(),
+    )
+  ) {
+    s.error = `${x.description} is already in Groceries.`;
+    return render();
+  }
+  s.saving = true;
+  const button = document.getElementById("moveToGroceries");
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Moving…";
+  }
+  try {
+    await move(x, "grocery");
+    close();
+  } catch (error) {
+    console.error("Jamjar move failed", error);
+    s.saving = false;
+    s.error = "Jamjar couldn’t move that item. Try again.";
+    render();
+  }
+}
 async function remove() {
   const x = s.items.find((i) => i.id === s.editId);
   if (!x) return;
@@ -799,7 +953,7 @@ function undoLocal(log) {
 function swipes() {
   document.querySelectorAll(".swipe-wrap").forEach((w) => {
     const b = w.querySelector(".item-row"),
-      primary = w.querySelector(".swipe-underlay.primary, .swipe-underlay.move"),
+      primary = w.querySelector(".swipe-underlay.primary"),
       l = primary?.querySelector(".under-label"),
       ii = primary?.querySelector(".under-icon"),
       x = s.items.find((v) => v.id === w.dataset.id);
@@ -810,6 +964,10 @@ function swipes() {
       horizontal = false,
       vertical = false;
     if (!x) return;
+    if (x.list === "pantry") {
+      b.onclick = () => open(x);
+      return;
+    }
     b.onpointerdown = (q) => {
       if (q.button !== 0) return;
       start = q.clientX;
@@ -824,12 +982,7 @@ function swipes() {
       if (!b.hasPointerCapture(q.pointerId) || vertical) return;
       const raw = q.clientX - start,
         y = q.clientY - startY,
-        next =
-          x.list === "grocery" || x.list === "shopping"
-            ? raw
-            : raw < 0
-              ? raw
-              : raw * 0.08;
+        next = raw;
       if (!horizontal && Math.abs(y) > 8 && Math.abs(y) > Math.abs(raw)) {
         vertical = true;
         drag = true;
@@ -857,19 +1010,11 @@ function swipes() {
       if (l)
         l.textContent = transfer
           ? "Move to Pantry"
-          : x.list === "grocery" || x.list === "shopping"
-          ? x.completed
+          : x.completed
             ? "Restore"
-            : "Bought"
-          : "Move to Groceries";
+            : "Bought";
       if (ii)
-        ii.innerHTML = I(
-          transfer
-            ? "archive"
-            : x.list === "grocery" || x.list === "shopping"
-              ? "check"
-              : "basket",
-        );
+        ii.innerHTML = I(transfer ? "archive" : "check");
     };
     b.onpointerup = (q) => {
       if (b.hasPointerCapture(q.pointerId))
@@ -894,11 +1039,6 @@ function swipes() {
           s.del = true;
           render();
         }, 180);
-      }
-      if (x.list === "pantry" && last <= -64) {
-        b.classList.add("moving-left");
-        navigator.vibrate?.(12);
-        return setTimeout(() => move(x, "grocery"), 180);
       }
       b.style.transform = "";
     };
@@ -1073,6 +1213,9 @@ function bind() {
     .getElementById("qty")
     ?.addEventListener("input", (q) => (s.qty = q.target.value));
   document.getElementById("save")?.addEventListener("click", save);
+  document
+    .getElementById("moveToGroceries")
+    ?.addEventListener("click", moveEditedPantryToGroceries);
   document.getElementById("cancel")?.addEventListener("click", () => close());
   document.getElementById("x")?.addEventListener("click", () => close());
   document.getElementById("delAsk")?.addEventListener("click", () => {
