@@ -1,4 +1,4 @@
-const CACHE = "jamjar-shell-v22";
+const CACHE = "jamjar-shell-v23";
 const BASE = new URL("./", self.registration.scope).pathname;
 const ASSETS = [
   BASE,

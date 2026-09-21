@@ -184,6 +184,11 @@ const rowColors = (list, index, total, category = "Other") => {
 };
 const normalizedCategory = (value) =>
   ITEM_CATEGORIES.includes(value) ? value : "Other";
+const compareDescriptions = (a, b) =>
+  a.description.localeCompare(b.description, undefined, {
+    sensitivity: "base",
+    numeric: true,
+  });
 const listActive = (list) =>
     s.items
       .filter((x) => x.list === list && !x.completed)
@@ -205,11 +210,7 @@ const listActive = (list) =>
           x.description.toLowerCase().includes(query.trim().toLowerCase()),
       );
     if (category !== "All") {
-      return items.sort(
-        (a, b) =>
-          (a.listAddedAt || a.createdAt || 0) -
-          (b.listAddedAt || b.createdAt || 0),
-      );
+      return items.sort(compareDescriptions);
     }
     return items.sort((a, b) => {
       const categoryOrder =
@@ -217,10 +218,7 @@ const listActive = (list) =>
         ITEM_CATEGORIES.indexOf(normalizedCategory(b.category));
       return (
         categoryOrder ||
-        a.description.localeCompare(b.description, undefined, {
-          sensitivity: "base",
-          numeric: true,
-        })
+        compareDescriptions(a, b)
       );
     });
   },
