@@ -1,4 +1,4 @@
-const CACHE = "jamjar-shell-v23";
+const CACHE = "jamjar-shell-v24";
 const BASE = new URL("./", self.registration.scope).pathname;
 const ASSETS = [
   BASE,
@@ -9,9 +9,9 @@ const ASSETS = [
   `${BASE}icon-192.png`,
   `${BASE}icon-512.png`,
   `${BASE}icon-maskable-512.png`,
-  `${BASE}fonts/figtree-400.ttf`,
-  `${BASE}fonts/figtree-500.ttf`,
-  `${BASE}fonts/figtree-600.ttf`,
+  `${BASE}fonts/figtree-400.woff2`,
+  `${BASE}fonts/figtree-500.woff2`,
+  `${BASE}fonts/figtree-600.woff2`,
   `${BASE}firebase-client.js`,
   `${BASE}vendor/firebase-app.js`,
   `${BASE}vendor/firebase-auth.js`,
@@ -55,17 +55,17 @@ self.addEventListener("fetch", (event) => {
     );
     return;
   }
+  // Stale-while-revalidate: answer from cache, refresh it in the background
+  // so the next launch picks up new code without bumping CACHE.
+  const refresh = fetch(event.request).then((response) => {
+    if (response.ok) {
+      const copy = response.clone();
+      caches.open(CACHE).then((cache) => cache.put(event.request, copy));
+    }
+    return response;
+  });
+  event.waitUntil(refresh.catch(() => {}));
   event.respondWith(
-    caches.match(event.request).then(
-      (cached) =>
-        cached ||
-        fetch(event.request).then((response) => {
-          if (response.ok) {
-            const copy = response.clone();
-            caches.open(CACHE).then((cache) => cache.put(event.request, copy));
-          }
-          return response;
-        }),
-    ),
+    caches.match(event.request).then((cached) => cached || refresh),
   );
 });

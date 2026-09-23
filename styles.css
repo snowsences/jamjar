@@ -1,20 +1,20 @@
 @font-face {
   font-family: Figtree;
-  src: url("./fonts/figtree-400.ttf") format("truetype");
+  src: url("./fonts/figtree-400.woff2") format("woff2");
   font-style: normal;
   font-weight: 400;
   font-display: swap;
 }
 @font-face {
   font-family: Figtree;
-  src: url("./fonts/figtree-500.ttf") format("truetype");
+  src: url("./fonts/figtree-500.woff2") format("woff2");
   font-style: normal;
   font-weight: 500;
   font-display: swap;
 }
 @font-face {
   font-family: Figtree;
-  src: url("./fonts/figtree-600.ttf") format("truetype");
+  src: url("./fonts/figtree-600.woff2") format("woff2");
   font-style: normal;
   font-weight: 600;
   font-display: swap;
@@ -923,6 +923,57 @@ strong {
   color: #b3c4ce;
   margin: 8px 0 22px;
 }
+.toast-host {
+  position: fixed;
+  z-index: 60;
+  left: max(16px, calc((100vw - 800px) / 2 + 16px));
+  right: max(96px, calc((100vw - 800px) / 2 + 96px));
+  bottom: calc(92px + env(safe-area-inset-bottom));
+  display: flex;
+  justify-content: flex-start;
+  pointer-events: none;
+}
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 100%;
+  min-height: 52px;
+  padding: 6px 6px 6px 18px;
+  border-radius: 12px;
+  background: #f7fafb;
+  color: #17242d;
+  box-shadow: 0 10px 32px #07111688;
+  pointer-events: auto;
+  animation: toast-in 180ms cubic-bezier(0.2, 0.85, 0.2, 1);
+}
+.toast span {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 15px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.toast-undo {
+  flex: 0 0 auto;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #8a5a00;
+  font-weight: 600;
+}
+.toast-undo:hover {
+  background: #17242d12;
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+}
 @media (min-width: 681px) {
   .bottom-tabs {
     left: 50%;
@@ -937,6 +988,9 @@ strong {
     padding-bottom: 95px;
   }
   .fab {
+    bottom: 105px;
+  }
+  .toast-host {
     bottom: 105px;
   }
   .topbar {

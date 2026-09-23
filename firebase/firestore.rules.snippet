@@ -1,5 +1,5 @@
 // Publish this complete ruleset in the jamjar-ec8c6 Firebase project.
-// Only Kevin and Megan's verified Google accounts can access Jamjar.
+// Only the two Jamjar members' Firebase Auth UIDs can access Jamjar.
 
 rules_version = '2';
 
@@ -7,8 +7,10 @@ service cloud.firestore {
   match /databases/{database}/documents {
     function isJamjarMember() {
       return request.auth != null
-        && request.auth.token.email_verified == true
-        && request.auth.token.email in ['allenkevinc@gmail.com', 'meganec96@gmail.com'];
+        && request.auth.uid in [
+          'YR6zFUL4msfoxOuvO741uLv5aWB3',
+          '7juHFkuegjghBUyCRaRbTPtu9P93'
+        ];
     }
 
     match /jamjarHouseholds/shared/items/{itemId} {
@@ -17,9 +19,11 @@ service cloud.firestore {
 
     match /jamjarHouseholds/shared/history/{historyId} {
       allow read: if isJamjarMember();
+
       allow create: if isJamjarMember()
         && request.resource.data.actorUid == request.auth.uid
         && request.resource.data.actorEmail == request.auth.token.email;
+
       allow update, delete: if false;
     }
   }
