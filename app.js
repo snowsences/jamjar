@@ -238,9 +238,8 @@ const itemSnapshot = (item) =>
       }
     : null;
 function addLocalLog(action, item, beforeItems, afterItems, extra = {}) {
-  const now = Date.now();
-  s.logs = [
-    {
+  const now = Date.now(),
+    log = {
       id: crypto.randomUUID(),
       action,
       description: item.description,
@@ -253,9 +252,9 @@ function addLocalLog(action, item, beforeItems, afterItems, extra = {}) {
       beforeItems: beforeItems.map(itemSnapshot),
       afterItems: afterItems.map(itemSnapshot),
       ...extra,
-    },
-    ...s.logs,
-  ];
+    };
+  s.logs = [log, ...s.logs];
+  return log;
 }
 function local(action, item, patch = {}) {
   const now = Date.now(),
@@ -272,7 +271,7 @@ function local(action, item, patch = {}) {
       x.id === item.id ? after : x,
     );
   }
-  addLocalLog(action, item, before ? [before] : [], after ? [after] : [], {
+  return addLocalLog(action, item, before ? [before] : [], after ? [after] : [], {
     toList: patch.list || "",
   });
 }
@@ -325,14 +324,14 @@ function renderHistory() {
     button.disabled = true;
     button.textContent = "Undoing…";
     try {
-      if (PREVIEW) undoLocal(log);
-      else await window.JamjarFirebase?.undoAction(log);
+      await undo(log);
       render();
     } catch (error) {
       console.error("Jamjar undo failed", error);
       s.undoPendingId = null;
       button.disabled = false;
       button.textContent = "Try again";
+      toast(undoError(error));
     }
   });
 }
@@ -370,6 +369,31 @@ function pantryRows(items) {
       return row(item, position, totals.get(category));
     })
     .join("");
+}
+const pantryEmptyText = () =>
+  s.query
+    ? "No pantry items match."
+    : s.pantryCategory === "All"
+      ? "Your pantry is empty."
+      : "No items in this category.";
+// Swaps in new Pantry results without re-rendering the page, so typing in
+// search doesn't rebuild the whole app (or disturb the input).
+function updatePantryResults() {
+  const surface = document.querySelector("#pantry-section .pantry-page-surface");
+  if (!surface) return render();
+  const next = document.createElement("div");
+  next.className = "pantry-page-surface";
+  next.innerHTML = pantryPage(pantry(), pantryEmptyText());
+  surface.replaceWith(next);
+  document.querySelectorAll("[data-pantry-category]").forEach((tab) => {
+    const active = tab.dataset.pantryCategory === s.pantryCategory;
+    tab.classList.toggle("active", active);
+    tab.setAttribute("aria-pressed", String(active));
+  });
+  const clear = document.getElementById("clearSearch");
+  if (clear) clear.hidden = !s.query;
+  bindRows(next);
+  pantryCategorySwipes();
 }
 function pantryPage(items, emptyText) {
   return `<div class="pantry-page"><ul class="item-list">${pantryRows(items)}${items.length ? "" : `<li class="empty-state">${emptyText}</li>`}</ul></div>`;
@@ -423,7 +447,7 @@ function app() {
     <header class="topbar"><div class="brand">${appIcon("brand-icon")}<span>Jamjar</span></div><span class="sync-status">${e(s.status)}</span></header>
     <main class="list-main">
       ${listMarkup("grocery", groceries, groceryDone, "Your grocery list is empty.")}
-      <section id="pantry-section" ${s.tab !== "pantry" ? "hidden" : ""}><div class="list-content"><div class="pantry-controls"><div class="search-field">${I("search")}<label class="sr-only" for="search">Search Pantry</label><input id="search" value="${e(s.query)}" placeholder="Search">${s.query ? `<button type="button" class="search-clear" id="clearSearch" aria-label="Clear search">${I("x")}</button>` : ""}</div><nav class="pantry-categories" aria-label="Pantry categories">${categoryTabs}</nav></div><div class="pantry-page-surface">${pantryPage(p, s.query ? "No pantry items match." : s.pantryCategory === "All" ? "Your pantry is empty." : "No items in this category.")}</div></div></section>
+      <section id="pantry-section" ${s.tab !== "pantry" ? "hidden" : ""}><div class="list-content"><div class="pantry-controls"><div class="search-field">${I("search")}<label class="sr-only" for="search">Search Pantry</label><input id="search" value="${e(s.query)}" placeholder="Search"><button type="button" class="search-clear" id="clearSearch" aria-label="Clear search" ${s.query ? "" : "hidden"}>${I("x")}</button></div><nav class="pantry-categories" aria-label="Pantry categories">${categoryTabs}</nav></div><div class="pantry-page-surface">${pantryPage(p, pantryEmptyText())}</div></div></section>
       ${listMarkup("shopping", shopping, shoppingDone, "Your shopping list is empty.")}
       <section ${s.tab !== "settings" ? "hidden" : ""}><div class="settings-page"><button class="settings-row" id="hist"><span class="setting-icon">${I("history")}</span><span><strong>History Log</strong><small>See every change and who made it</small></span><span>›</span></button><div class="settings-row static"><span class="avatar">${e(initial)}</span><span><strong>${e(u.displayName || u.email || "")}</strong><small>${e(u.email || "")}</small></span></div>${s.install ? `<button class="settings-row" id="install"><span class="setting-icon">${I("package")}</span><span><strong>Install Jamjar</strong><small>Add it to this device</small></span><span>›</span></button>` : ""}<button class="settings-row danger-row" id="signout"><span class="setting-icon">${I("logout")}</span><span><strong>Sign out</strong><small>Keep shared data in Jamjar</small></span></button></div></section>
     </main>
@@ -721,6 +745,7 @@ function pantryCategorySwipes() {
   surface.addEventListener("pointerdown", (event) => {
     if (!event.isPrimary || (event.pointerType === "mouse" && event.button !== 0))
       return;
+    prepareAdjacentPages();
     startX = event.clientX;
     startY = event.clientY;
     lastX = 0;
@@ -760,14 +785,12 @@ function pantryCategorySwipes() {
     },
     true,
   );
-  const prepareAdjacentPages = () => {
+  // Built on first touch rather than on every render.
+  function prepareAdjacentPages() {
     if (!surface.isConnected || s.tab !== "pantry") return;
     makeAdjacentPage(-1);
     makeAdjacentPage(1);
-  };
-  if ("requestIdleCallback" in window)
-    requestIdleCallback(prepareAdjacentPages, { timeout: 220 });
-  else setTimeout(prepareAdjacentPages, 80);
+  }
 }
 function sameItems(a, b) {
   if (a.length !== b.length) return false;
@@ -910,13 +933,16 @@ async function save() {
     render();
   }
 }
+const quoted = (x) => `“${x.description}”`;
 async function toggle(x) {
+  const message = `${x.completed ? "Restored" : "Bought"} ${quoted(x)}`;
   if (PREVIEW) {
-    local(x.completed ? "restored" : "bought", x, {
+    const log = local(x.completed ? "restored" : "bought", x, {
       completed: !x.completed,
       ...(x.completed ? { listAddedAt: Date.now() } : {}),
     });
     render();
+    toast(message, log);
     return;
   }
   const next = {
@@ -928,12 +954,12 @@ async function toggle(x) {
   s.items = s.items.map((item) => (item.id === x.id ? next : item));
   render();
   try {
-    await window.JamjarFirebase?.toggleBought(x);
+    toast(message, await window.JamjarFirebase?.toggleBought(x));
   } catch (error) {
     console.error("Jamjar bought update failed", error);
     s.items = s.items.map((item) => (item.id === x.id ? x : item));
-    s.status = "Couldn’t update that item. Try again.";
     render();
+    toast("Couldn’t update that item. Try again.");
   }
 }
 async function move(x, to) {
@@ -948,8 +974,9 @@ async function move(x, to) {
     s.status = `Already in ${listLabel(to)}`;
     return render();
   }
+  const message = `Moved ${quoted(x)} to ${listLabel(to)}`;
   if (PREVIEW) {
-    local(to === "pantry" ? "moved_to_pantry" : "moved_to_grocery", x, {
+    const log = local(to === "pantry" ? "moved_to_pantry" : "moved_to_grocery", x, {
       list: to,
       completed: false,
       quantity: "",
@@ -957,6 +984,7 @@ async function move(x, to) {
       listAddedAt: Date.now(),
     });
     render();
+    toast(message, log);
     return true;
   }
   const next = {
@@ -971,45 +999,103 @@ async function move(x, to) {
   s.items = s.items.map((item) => (item.id === x.id ? next : item));
   render();
   try {
-    await window.JamjarFirebase?.moveItem(x, to);
+    toast(message, await window.JamjarFirebase?.moveItem(x, to));
     return true;
   } catch (error) {
     console.error("Jamjar move failed", error);
     s.items = s.items.map((item) => (item.id === x.id ? x : item));
-    s.status = "Couldn’t move that item. Try again.";
     render();
+    toast("Couldn’t move that item. Try again.");
     return false;
   }
 }
 async function remove() {
   const x = s.items.find((i) => i.id === s.editId);
   if (!x) return;
-  if (PREVIEW) local("deleted", x);
-  else await window.JamjarFirebase?.deleteItem(x);
+  let log = null,
+    failed = false;
+  try {
+    log = PREVIEW
+      ? local("deleted", x)
+      : await window.JamjarFirebase?.deleteItem(x);
+  } catch (error) {
+    console.error("Jamjar delete failed", error);
+    failed = true;
+  }
   s.del = false;
   s.editor = false;
   s.editId = null;
+  s.saving = false;
   if (window.history.state?.editor) window.history.back();
   render();
+  if (failed) toast("Couldn’t delete that item. Try again.");
+  else toast(`Deleted ${quoted(x)}`, log);
 }
 async function clearAll() {
   const source = s.clearList,
-    items = listDone(source);
-  if (PREVIEW) {
-    s.items = s.items.filter((item) => !items.some((done) => done.id === item.id));
-    addLocalLog(
-      "cleared_completed",
-      {
-        description: `${items.length} completed ${items.length === 1 ? "item" : "items"}`,
-        quantity: "",
-        list: source,
-      },
-      items,
-      [],
-    );
-  } else await window.JamjarFirebase?.clearCompleted(items, source);
+    items = listDone(source),
+    label = `${items.length} completed ${items.length === 1 ? "item" : "items"}`;
+  let log = null,
+    failed = false;
+  try {
+    if (PREVIEW) {
+      s.items = s.items.filter(
+        (item) => !items.some((done) => done.id === item.id),
+      );
+      log = addLocalLog(
+        "cleared_completed",
+        { description: label, quantity: "", list: source },
+        items,
+        [],
+      );
+    } else log = await window.JamjarFirebase?.clearCompleted(items, source);
+  } catch (error) {
+    console.error("Jamjar clear failed", error);
+    failed = true;
+  }
   s.clearList = "";
   render();
+  if (failed) toast("Couldn’t clear completed items. Try again.");
+  else toast(`Cleared ${label}`, log);
+}
+const toastHost = document.createElement("div");
+toastHost.className = "toast-host";
+toastHost.setAttribute("role", "status");
+toastHost.setAttribute("aria-live", "polite");
+document.body.append(toastHost);
+let toastTimer = 0;
+function hideToast() {
+  clearTimeout(toastTimer);
+  toastTimer = 0;
+  toastHost.replaceChildren();
+}
+function toast(message, log = null) {
+  clearTimeout(toastTimer);
+  toastHost.innerHTML = `<div class="toast"><span>${e(message)}</span>${log ? '<button type="button" class="toast-undo">Undo</button>' : ""}</div>`;
+  toastHost.querySelector(".toast-undo")?.addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    clearTimeout(toastTimer);
+    button.disabled = true;
+    button.textContent = "Undoing…";
+    try {
+      await undo(log);
+      hideToast();
+    } catch (error) {
+      console.error("Jamjar undo failed", error);
+      toast(undoError(error));
+    }
+  });
+  toastTimer = setTimeout(hideToast, log ? 6000 : 4000);
+}
+const undoError = (error) =>
+  ["jamjar/conflict", "unavailable"].includes(error?.code)
+    ? error.message
+    : "Couldn’t undo that. Try again.";
+async function undo(log) {
+  if (PREVIEW) {
+    undoLocal(log);
+    render();
+  } else await window.JamjarFirebase?.undoAction(log);
 }
 function undoLocal(log) {
   const before = (log.beforeItems || []).map(itemSnapshot),
@@ -1035,8 +1121,8 @@ function undoLocal(log) {
     { targetAction: log.action, targetHistoryId: log.id },
   );
 }
-function swipes() {
-  document.querySelectorAll(".swipe-wrap").forEach((w) => {
+function swipes(scope = document) {
+  scope.querySelectorAll(".swipe-wrap").forEach((w) => {
     const b = w.querySelector(".item-row"),
       primary = w.querySelector(".swipe-underlay.primary"),
       l = primary?.querySelector(".under-label"),
@@ -1288,15 +1374,14 @@ function bind() {
   document.getElementById("search")?.addEventListener("input", (q) => {
     s.query = q.target.value;
     s.pantryCategory = "All";
-    render();
-    const z = document.getElementById("search");
-    z?.focus();
-    z?.setSelectionRange(s.query.length, s.query.length);
+    updatePantryResults();
   });
   document.getElementById("clearSearch")?.addEventListener("click", () => {
+    const search = document.getElementById("search");
     s.query = "";
-    render();
-    document.getElementById("search")?.focus();
+    if (search) search.value = "";
+    updatePantryResults();
+    search?.focus();
   });
   document
     .getElementById("desc")
@@ -1305,15 +1390,6 @@ function bind() {
     .getElementById("qty")
     ?.addEventListener("input", (q) => (s.qty = q.target.value));
   document.getElementById("save")?.addEventListener("click", save);
-  document.querySelectorAll("[data-move-to-groceries]").forEach((button) => {
-    button.addEventListener("click", (event) => {
-      event.stopPropagation();
-      const item = s.items.find(
-        (candidate) => candidate.id === button.dataset.moveToGroceries,
-      );
-      if (item) void move(item, "grocery");
-    });
-  });
   document.getElementById("cancel")?.addEventListener("click", () => close());
   document.getElementById("x")?.addEventListener("click", () => close());
   document.getElementById("delAsk")?.addEventListener("click", () => {
@@ -1331,8 +1407,20 @@ function bind() {
   });
   document.getElementById("delYes")?.addEventListener("click", remove);
   pantryCategorySwipes();
-  swipes();
+  bindRows();
   pullToClear();
+}
+function bindRows(scope = document) {
+  swipes(scope);
+  scope.querySelectorAll("[data-move-to-groceries]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const item = s.items.find(
+        (candidate) => candidate.id === button.dataset.moveToGroceries,
+      );
+      if (item) void move(item, "grocery");
+    });
+  });
 }
 addEventListener("beforeinstallprompt", (q) => {
   q.preventDefault();
@@ -1383,6 +1471,7 @@ if (!PREVIEW) {
     if (itemsChanged || statusChanged || (logsChanged && (s.history || s.editor)))
       scheduleRender();
   });
+  addEventListener("jamjar:write-error", (q) => toast(q.detail));
   addEventListener("jamjar:error", (q) => {
     s.status = q.detail || "Sync unavailable";
     render();
