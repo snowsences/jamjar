@@ -1,7 +1,30 @@
+import {
+  platform,
+  reducedMotion,
+  phone,
+  SPRING,
+  EASE_IN,
+  haptic,
+  velocityTracker,
+  ripple,
+} from "./motion.js";
 const root = document.getElementById("app");
 const PREVIEW = ["terminal.local", "localhost", "127.0.0.1"].includes(
   location.hostname,
 );
+const SIGNED_IN_KEY = "jamjar:signed-in";
+let wasSignedIn = false;
+// A signed-in launch needs Firestore straight away, so fetch it alongside the
+// rest of the code instead of after firebase-client.js has loaded.
+try {
+  wasSignedIn = !PREVIEW && Boolean(localStorage.getItem(SIGNED_IN_KEY));
+  if (wasSignedIn) {
+    const preload = document.createElement("link");
+    preload.rel = "modulepreload";
+    preload.href = "./vendor/firebase-firestore.js";
+    document.head.append(preload);
+  }
+} catch {}
 const PALETTES = {
   grocery: ["#E32960", "#F9732F", "#FEA000"],
   pantry: ["#007DC2", "#00AB6C", "#8AD928"],
@@ -96,6 +119,7 @@ const s = {
     : null,
   authKnown: PREVIEW,
   ready: PREVIEW,
+  loaded: PREVIEW,
   history: false,
   query: "",
   pantryCategory: "All",
@@ -114,6 +138,7 @@ const s = {
   undoPendingId: null,
   saving: false,
 };
+let api = null;
 let installPrompt = null;
 let renderFrame = 0;
 const e = (x) =>
@@ -148,8 +173,8 @@ const paths = {
 };
 const I = (n) =>
   `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">${paths[n] || ""}</svg>`;
-const appIcon = (className = "") =>
-  `<img class="app-icon ${className}" src="./icon-192.png" alt="">`;
+const appIcon = (className = "", src = "./icon-192.png") =>
+  `<img class="app-icon ${className}" src="${src}" alt="">`;
 const mixColor = (from, to, amount) => {
   const a = from.match(/[\da-f]{2}/gi).map((v) => parseInt(v, 16)),
     b = to.match(/[\da-f]{2}/gi).map((v) => parseInt(v, 16));
@@ -276,12 +301,9 @@ function local(action, item, patch = {}) {
   });
 }
 function gate() {
-  root.innerHTML = `<main class="gate"><div class="gate-card">${appIcon("gate-icon")}<h1>Jamjar</h1>${!s.authKnown ? `<p>${s.ready ? "Sign in with Google to share your grocery list and pantry." : "Opening your lists…"}</p>` : ""}<button class="btn google-button" id="signin" ${!s.ready ? "disabled" : ""}>Sign in with Google</button></div></main>`;
-  document
-    .getElementById("signin")
-    ?.addEventListener("click", () => window.JamjarFirebase?.signIn());
+  patch(`<main class="gate"><div class="gate-card">${appIcon("gate-icon")}<h1>Jamjar</h1>${!s.authKnown ? `<p>${s.ready ? "Sign in with Google to share your grocery list and pantry." : "Opening your lists…"}</p>` : ""}<button class="btn google-button" id="signin" ${!s.ready ? "disabled" : ""}>Sign in with Google</button></div></main>`);
 }
-function renderHistory() {
+function historyMarkup() {
   const sorted = [...s.logs].sort((a, b) => b.createdAt - a.createdAt);
   const h = sorted
     .map(
@@ -314,26 +336,24 @@ function renderHistory() {
       },
     )
     .join("");
-  root.innerHTML = `<main class="history-screen"><header class="screen-head"><button id="back" aria-label="Back">${I("back")}</button><h1>History Log</h1></header><ol class="history-list">${h || '<li class="empty-state">Actions will appear here as you use Jamjar.</li>'}</ol></main>`;
-  document.getElementById("back").onclick = () => window.window.history.back();
-  document.querySelector("[data-undo-id]")?.addEventListener("click", async (event) => {
-    const button = event.currentTarget,
-      log = s.logs.find((entry) => entry.id === button.dataset.undoId);
-    if (!log) return;
-    s.undoPendingId = log.id;
-    button.disabled = true;
-    button.textContent = "Undoing…";
-    try {
-      await undo(log);
-      render();
-    } catch (error) {
-      console.error("Jamjar undo failed", error);
-      s.undoPendingId = null;
-      button.disabled = false;
-      button.textContent = "Try again";
-      toast(undoError(error));
-    }
-  });
+  return `<div class="history-layer" id="historyLayer"><main class="history-screen"><header class="screen-head"><button id="back" aria-label="Back">${I("back")}</button><h1>History Log</h1></header><ol class="history-list">${h || '<li class="empty-state">Actions will appear here as you use Jamjar.</li>'}</ol></main></div>`;
+}
+async function undoFromHistory(button) {
+  const log = s.logs.find((entry) => entry.id === button.dataset.undoId);
+  if (!log) return;
+  s.undoPendingId = log.id;
+  button.disabled = true;
+  button.textContent = "Undoing…";
+  try {
+    await undo(log);
+    render();
+  } catch (error) {
+    console.error("Jamjar undo failed", error);
+    s.undoPendingId = null;
+    button.disabled = false;
+    button.textContent = "Try again";
+    toast(undoError(error));
+  }
 }
 const listLabel = (list) =>
   ({ grocery: "Groceries", pantry: "Pantry", shopping: "Shopping" })[list] ||
@@ -376,119 +396,176 @@ const pantryEmptyText = () =>
     : s.pantryCategory === "All"
       ? "Your pantry is empty."
       : "No items in this category.";
-// Swaps in new Pantry results without re-rendering the page, so typing in
-// search doesn't rebuild the whole app (or disturb the input).
-function updatePantryResults() {
-  const surface = document.querySelector("#pantry-section .pantry-page-surface");
-  if (!surface) return render();
-  const next = document.createElement("div");
-  next.className = "pantry-page-surface";
-  next.innerHTML = pantryPage(pantry(), pantryEmptyText());
-  surface.replaceWith(next);
-  document.querySelectorAll("[data-pantry-category]").forEach((tab) => {
-    const active = tab.dataset.pantryCategory === s.pantryCategory;
-    tab.classList.toggle("active", active);
-    tab.setAttribute("aria-pressed", String(active));
-  });
-  const clear = document.getElementById("clearSearch");
-  if (clear) clear.hidden = !s.query;
-  bindRows(next);
-  pantryCategorySwipes();
-}
+// Placeholder rows shown until the first sync arrives.
+const skeleton = () =>
+  Array.from(
+    { length: 6 },
+    (_, i) =>
+      `<li class="skeleton-row" aria-hidden="true" style="--i:${i}"><span></span><span></span></li>`,
+  ).join("");
 function pantryPage(items, emptyText) {
-  return `<div class="pantry-page"><ul class="item-list">${pantryRows(items)}${items.length ? "" : `<li class="empty-state">${emptyText}</li>`}</ul></div>`;
+  return `<div class="pantry-page"><ul class="item-list">${s.loaded ? `${pantryRows(items)}${items.length ? "" : `<li class="empty-state">${emptyText}</li>`}` : skeleton()}</ul></div>`;
 }
-function editor() {
-  if (!s.editor) return "";
-  const x = s.items.find((i) => i.id === s.editId),
-    editorList = x?.list || s.tab,
-    hasQuantity = editorList === "grocery" || editorList === "shopping",
-    opts = [
+let suggestionCache = { items: null, logs: null, html: "" };
+// Rebuilt only when the data changes, not on every render of the editor.
+function suggestions() {
+  if (suggestionCache.items !== s.items || suggestionCache.logs !== s.logs) {
+    const options = [
       ...new Set([
         ...s.items.map((i) => i.description),
         ...s.logs.map((l) => l.description),
       ]),
     ].sort();
+    suggestionCache = {
+      items: s.items,
+      logs: s.logs,
+      html: options.map((v) => `<option value="${e(v)}"></option>`).join(""),
+    };
+  }
+  return suggestionCache.html;
+}
+function editor() {
+  if (!s.editor) return "";
+  const x = s.items.find((i) => i.id === s.editId),
+    editorList = x?.list || s.tab,
+    hasQuantity = editorList === "grocery" || editorList === "shopping";
   const descriptionPlaceholder = hasQuantity
     ? "What do you need?"
     : "What do you have?";
   const categorySelector = hasQuantity
     ? ""
-    : `<div class="category-selector" role="group" aria-label="Category">${ITEM_CATEGORIES.map((category) => `<button type="button" class="category-choice${s.itemCategory === category ? " active" : ""}" data-item-category="${e(category)}" aria-pressed="${s.itemCategory === category}">${e(category)}</button>`).join("")}</div>`;
+    : `<div class="category-selector" role="group" aria-label="Category">${ITEM_CATEGORIES.map((category) => `<button type="button" class="category-choice${s.itemCategory === category ? " active" : ""}" style="--chip:${PANTRY_PALETTES[category][1]}" data-item-category="${e(category)}" aria-pressed="${s.itemCategory === category}">${e(category)}</button>`).join("")}</div>`;
   const actions = `<div class="dialog-actions"><button class="btn ghost" id="cancel">Cancel</button><button class="btn" id="save" ${s.saving ? "disabled" : ""}>${s.saving ? "Saving…" : "Save"}</button>${x ? `<button class="btn ghost delete-button" id="delAsk">${I("trash")}Delete</button>` : ""}</div>`;
-  return `<div class="dialog-backdrop editor"><section class="dialog dialog-wrap" role="dialog" aria-modal="true"><button class="close-x" id="x" aria-label="Close editor">×</button><h2>${x ? "Edit item" : `Add to ${listLabel(editorList)}`}</h2><div class="form-stack"><label>Description<input id="desc" maxlength="120" list="suggestions" value="${e(s.desc)}" placeholder="${descriptionPlaceholder}"></label><datalist id="suggestions">${opts.map((v) => `<option value="${e(v)}"></option>`).join("")}</datalist>${categorySelector}${hasQuantity ? `<label>Quantity <span>Optional</span><input id="qty" maxlength="40" value="${e(s.qty)}" placeholder="2, 3 cans, 1 lb…"></label>` : ""}${s.error ? `<p class="form-error" role="alert">${e(s.error)}</p>` : ""}</div>${actions}</section></div>`;
+  return `<div class="dialog-backdrop editor"><section class="dialog dialog-wrap" role="dialog" aria-modal="true"><div class="sheet-grabber" aria-hidden="true"></div><button class="close-x" id="x" aria-label="Close editor">×</button><h2>${x ? "Edit item" : `Add to ${listLabel(editorList)}`}</h2><div class="form-stack"><label>Description<input id="desc" maxlength="120" list="suggestions" value="${e(s.desc)}" placeholder="${descriptionPlaceholder}"></label><datalist id="suggestions">${suggestions()}</datalist>${categorySelector}${hasQuantity ? `<label>Quantity<input id="qty" maxlength="40" value="${e(s.qty)}" placeholder="2, 3 cans, 1 lb…"></label>` : ""}${s.error ? `<p class="form-error" role="alert">${e(s.error)}</p>` : ""}</div>${actions}</section></div>`;
 }
 function confirm() {
   if (s.clearList) {
     const n = listDone(s.clearList).length;
-    return `<div class="dialog-backdrop"><section class="dialog confirm-dialog"><h2>Clear completed items?</h2><p>This removes all ${n} completed ${n === 1 ? "item" : "items"} from ${e(listLabel(s.clearList))}. The action can be undone from History.</p><div class="dialog-actions"><button class="btn ghost" id="clearNo">Cancel</button><button class="btn" id="clearYes">Clear completed</button></div></section></div>`;
+    return `<div class="dialog-backdrop confirm"><section class="dialog confirm-dialog"><h2>Clear completed items?</h2><p>This removes all ${n} completed ${n === 1 ? "item" : "items"} from ${e(listLabel(s.clearList))}. The action can be undone from History.</p><div class="dialog-actions"><button class="btn ghost" id="clearNo">Cancel</button><button class="btn" id="clearYes">Clear completed</button></div></section></div>`;
   }
   if (s.del) {
     const x = s.items.find((i) => i.id === s.editId);
-    return `<div class="dialog-backdrop"><section class="dialog confirm-dialog"><h2>Delete “${e(x?.description || "")}”?</h2><p>This removes it from Jamjar. The action will remain in History.</p><div class="dialog-actions"><button class="btn ghost" id="delNo">Cancel</button><button class="btn destructive" id="delYes">Delete</button></div></section></div>`;
+    return `<div class="dialog-backdrop confirm"><section class="dialog confirm-dialog"><h2>Delete “${e(x?.description || "")}”?</h2><p>This removes it from Jamjar. The action will remain in History.</p><div class="dialog-actions"><button class="btn ghost" id="delNo">Cancel</button><button class="btn destructive" id="delYes">Delete</button></div></section></div>`;
   }
   return "";
 }
+const activeCount = (list) =>
+  s.items.reduce(
+    (count, x) => count + (x.list === list && !x.completed ? 1 : 0),
+    0,
+  );
+// Only the visible tab is built; the others are rebuilt when switched to.
 function app() {
-  const groceries = listActive("grocery"),
-    groceryDone = listDone("grocery"),
-    shopping = listActive("shopping"),
-    shoppingDone = listDone("shopping"),
-    p = pantry(),
+  const groceries = activeCount("grocery"),
+    shopping = activeCount("shopping"),
     u = s.actor || {},
     initial = (u.displayName?.[0] || u.email?.[0] || "?").toUpperCase();
-  const categoryTabs = PANTRY_CATEGORIES.map(
-    (category) =>
-      `<button type="button" class="pantry-category-tab${s.pantryCategory === category ? " active" : ""}" data-pantry-category="${e(category)}" aria-pressed="${s.pantryCategory === category}">${e(category)}</button>`,
-  ).join("");
-  const listMarkup = (list, activeItems, completedItems, emptyText) =>
-    `<section id="${list}-section" ${s.tab !== list ? "hidden" : ""}><div class="list-content"><ul class="item-list">${activeItems.map((x, i) => row(x, i, activeItems.length)).join("")}${activeItems.length ? "" : `<li class="empty-state">${emptyText}</li>`}${completedItems.map((x, i) => row(x, i, completedItems.length)).join("")}</ul>${completedItems.length ? `<div class="clear-pull" id="clearPull" aria-hidden="true">${I("trash")}<span>Pull up to clear completed</span></div>` : ""}</div></section>`;
-  root.innerHTML = `<div class="app-shell tab-${s.tab}${s.oneHanded ? " one-handed" : ""}">
-    <header class="topbar"><div class="brand">${appIcon("brand-icon")}<span>Jamjar</span></div><span class="sync-status">${e(s.status)}</span></header>
+  const categoryTabs = () =>
+    PANTRY_CATEGORIES.map(
+      (category) =>
+        `<button type="button" class="pantry-category-tab${s.pantryCategory === category ? " active" : ""}" data-pantry-category="${e(category)}" aria-pressed="${s.pantryCategory === category}">${e(category)}</button>`,
+    ).join("");
+  const listMarkup = (list, emptyText) => {
+    const activeItems = listActive(list),
+      completedItems = listDone(list);
+    if (!s.loaded)
+      return `<section id="${list}-section"><div class="list-content"><ul class="item-list">${skeleton()}</ul></div></section>`;
+    return `<section id="${list}-section"><div class="list-content"><ul class="item-list">${activeItems.map((x, i) => row(x, i, activeItems.length)).join("")}${activeItems.length ? "" : `<li class="empty-state">${emptyText}</li>`}${completedItems.map((x, i) => row(x, i, completedItems.length)).join("")}</ul>${completedItems.length ? `<div class="clear-pull" id="clearPull" aria-hidden="true"><span class="pull-ring"><svg viewBox="0 0 36 36" aria-hidden="true"><circle cx="18" cy="18" r="16"/></svg>${I("trash")}</span><span class="pull-label">Pull up to clear completed</span></div>` : ""}</div></section>`;
+  };
+  const sections = {
+    grocery: () => listMarkup("grocery", "Your grocery list is empty."),
+    pantry: () =>
+      `<section id="pantry-section"><div class="list-content"><div class="pantry-controls"><div class="search-field">${I("search")}<label class="sr-only" for="search">Search Pantry</label><input id="search" value="${e(s.query)}" placeholder="Search"><button type="button" class="search-clear" id="clearSearch" aria-label="Clear search" ${s.query ? "" : "hidden"}>${I("x")}</button></div><nav class="pantry-categories" aria-label="Pantry categories">${categoryTabs()}<span class="category-indicator" data-live-style aria-hidden="true"></span></nav></div><div class="pantry-page-surface">${pantryPage(pantry(), pantryEmptyText())}</div></div></section>`,
+    shopping: () => listMarkup("shopping", "Your shopping list is empty."),
+    settings: () =>
+      `<section><div class="settings-page"><button class="settings-row" id="hist"><span class="setting-icon">${I("history")}</span><span><strong>History Log</strong><small>See every change and who made it</small></span><span>›</span></button><div class="settings-row static"><span class="avatar">${e(initial)}</span><span><strong>${e(u.displayName || u.email || "")}</strong><small>${e(u.email || "")}</small></span></div>${s.install ? `<button class="settings-row" id="install"><span class="setting-icon">${I("package")}</span><span><strong>Install Jamjar</strong><small>Add it to this device</small></span><span>›</span></button>` : ""}<button class="settings-row danger-row" id="signout"><span class="setting-icon">${I("logout")}</span><span><strong>Sign out</strong><small>Keep shared data in Jamjar</small></span></button></div></section>`,
+  };
+  patch(`<div class="app-shell tab-${s.tab}${s.oneHanded ? " one-handed" : ""}" ${s.history ? "inert" : ""}>
+    <header class="topbar"><div class="brand">${appIcon("brand-icon", "./icon-96.png")}<span>Jamjar</span></div><span class="sync-status">${e(s.status)}</span></header>
     <main class="list-main">
-      ${listMarkup("grocery", groceries, groceryDone, "Your grocery list is empty.")}
-      <section id="pantry-section" ${s.tab !== "pantry" ? "hidden" : ""}><div class="list-content"><div class="pantry-controls"><div class="search-field">${I("search")}<label class="sr-only" for="search">Search Pantry</label><input id="search" value="${e(s.query)}" placeholder="Search"><button type="button" class="search-clear" id="clearSearch" aria-label="Clear search" ${s.query ? "" : "hidden"}>${I("x")}</button></div><nav class="pantry-categories" aria-label="Pantry categories">${categoryTabs}</nav></div><div class="pantry-page-surface">${pantryPage(p, pantryEmptyText())}</div></div></section>
-      ${listMarkup("shopping", shopping, shoppingDone, "Your shopping list is empty.")}
-      <section ${s.tab !== "settings" ? "hidden" : ""}><div class="settings-page"><button class="settings-row" id="hist"><span class="setting-icon">${I("history")}</span><span><strong>History Log</strong><small>See every change and who made it</small></span><span>›</span></button><div class="settings-row static"><span class="avatar">${e(initial)}</span><span><strong>${e(u.displayName || u.email || "")}</strong><small>${e(u.email || "")}</small></span></div>${s.install ? `<button class="settings-row" id="install"><span class="setting-icon">${I("package")}</span><span><strong>Install Jamjar</strong><small>Add it to this device</small></span><span>›</span></button>` : ""}<button class="settings-row danger-row" id="signout"><span class="setting-icon">${I("logout")}</span><span><strong>Sign out</strong><small>Keep shared data in Jamjar</small></span></button></div></section>
+      ${sections[s.tab]()}
     </main>
     ${s.tab !== "settings" ? `<button class="fab" id="add">${I("plus")}</button>` : ""}
     <nav class="bottom-tabs">
-      <button class="tab-trigger ${s.tab === "grocery" ? "active" : ""}" data-tab="grocery">${I("basket")}<span>Groceries</span>${groceries.length ? `<b>${groceries.length}</b>` : ""}</button>
+      <button class="tab-trigger ${s.tab === "grocery" ? "active" : ""}" data-tab="grocery">${I("basket")}<span>Groceries</span>${groceries ? `<b>${groceries}</b>` : ""}</button>
       <button class="tab-trigger ${s.tab === "pantry" ? "active" : ""}" data-tab="pantry">${I("package")}<span>Pantry</span></button>
-      <button class="tab-trigger ${s.tab === "shopping" ? "active" : ""}" data-tab="shopping">${I("shopping")}<span>Shopping</span>${shopping.length ? `<b>${shopping.length}</b>` : ""}</button>
+      <button class="tab-trigger ${s.tab === "shopping" ? "active" : ""}" data-tab="shopping">${I("shopping")}<span>Shopping</span>${shopping ? `<b>${shopping}</b>` : ""}</button>
       <button class="tab-trigger ${s.tab === "settings" ? "active" : ""}" data-tab="settings">${I("settings")}<span>Settings</span></button>
     </nav>
-  </div>${editor()}${confirm()}`;
-  bind();
+  </div>${editor()}${confirm()}${s.history ? historyMarkup() : ""}`);
+  swipes();
+  pantryCategorySwipes();
+  pullToClear();
 }
+// Rows are only animated in and out when the same list is still showing.
+const layoutContext = () =>
+  `${s.tab}|${s.tab === "pantry" ? `${s.pantryCategory}|${s.query}` : ""}|${s.history}`;
 function captureLayout() {
   const positions = new Map(),
-    states = new Map();
+    states = new Map(),
+    rows = new Map();
   visibleRows().forEach((row) => {
-    positions.set(row.dataset.id, row.getBoundingClientRect().top);
+    const rect = row.getBoundingClientRect();
+    positions.set(row.dataset.id, rect.top);
     states.set(row.dataset.id, row.classList.contains("is-done"));
+    rows.set(row.dataset.id, { row, rect });
   });
-  return { positions, states };
+  return { positions, states, rows, context: layoutContext() };
 }
 function visibleRows() {
   return [...document.querySelectorAll(".swipe-wrap[data-id]")].filter(
     (row) =>
-      !row.closest(".pantry-page-adjacent") &&
-      !row.closest("section[hidden]"),
+      !row.closest(".pantry-page-adjacent"),
   );
 }
+// A removed row leaves a copy behind that collapses while the rows below
+// slide up into its place.
+function collapseGhost({ row, rect }) {
+  if (rect.bottom < 0 || rect.top > innerHeight) return;
+  const ghost = row.cloneNode(true);
+  ghost.classList.add("row-ghost");
+  ghost.removeAttribute("data-id");
+  Object.assign(ghost.style, {
+    top: `${rect.top}px`,
+    left: `${rect.left}px`,
+    width: `${rect.width}px`,
+    height: `${rect.height}px`,
+  });
+  document.body.append(ghost);
+  ghost
+    .animate(
+      [
+        { height: `${rect.height}px`, opacity: 1 },
+        { height: "0px", opacity: 0 },
+      ],
+      { duration: 300, easing: SPRING, fill: "forwards" },
+    )
+    .finished.then(
+      () => ghost.remove(),
+      () => ghost.remove(),
+    );
+}
 function animateLayout(previous) {
-  if (!previous.positions.size) return;
-  const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  visibleRows().forEach((row) => {
+  if (!previous.positions.size || reducedMotion()) return;
+  const sameList = previous.context === layoutContext();
+  // Read every position before starting any animation so layout runs once.
+  const rows = visibleRows().map((row) => [
+    row,
+    row.getBoundingClientRect().top,
+  ]);
+  if (sameList) {
+    const present = new Set(rows.map(([row]) => row.dataset.id));
+    previous.rows.forEach((entry, id) => {
+      if (!present.has(id)) collapseGhost(entry);
+    });
+  }
+  rows.forEach(([row, newTop]) => {
     const id = row.dataset.id,
       wasDone = previous.states.get(id),
       isDone = row.classList.contains("is-done"),
       label = row.querySelector(".item-copy > span");
-    if (!reduced && wasDone === false && isDone)
-      label?.classList.add("strike-entering");
-    else if (!reduced && wasDone === true && !isDone)
-      label?.classList.add("strike-leaving");
+    if (wasDone === false && isDone) label?.classList.add("strike-entering");
+    else if (wasDone === true && !isDone) label?.classList.add("strike-leaving");
     if (
       label?.classList.contains("strike-entering") ||
       label?.classList.contains("strike-leaving")
@@ -497,16 +574,23 @@ function animateLayout(previous) {
         () => label.classList.remove("strike-entering", "strike-leaving"),
         500,
       );
-    if (reduced || !row.animate) return;
-    const oldTop = previous.positions.get(id),
-      newTop = row.getBoundingClientRect().top;
+    if (!row.animate) return;
+    const oldTop = previous.positions.get(id);
+    if (oldTop === undefined && sameList)
+      return void row.animate(
+        [
+          { opacity: 0, transform: "scale(0.96)" },
+          { opacity: 1, transform: "none" },
+        ],
+        { duration: 360, easing: SPRING },
+      );
     if (oldTop !== undefined && Math.abs(oldTop - newTop) > 0.5)
       row.animate(
         [
           { transform: `translateY(${oldTop - newTop}px)` },
           { transform: "translateY(0)" },
         ],
-        { duration: 300, easing: "cubic-bezier(0.37, 0, 0.63, 1)" },
+        { duration: 380, easing: SPRING },
       );
   });
 }
@@ -549,72 +633,18 @@ function scrollTabTop() {
     }),
   );
 }
-function pagePantryCategory(direction) {
-  const current = PANTRY_CATEGORIES.indexOf(s.pantryCategory),
-    next = Math.max(
-      0,
-      Math.min(PANTRY_CATEGORIES.length - 1, current + direction),
-    );
-  if (next === current) return;
-  const outgoing = document
-    .querySelector("#pantry-section .pantry-page")
-    ?.cloneNode(true);
-  s.pantryCategory = PANTRY_CATEGORIES[next];
-  s.query = "";
-  render();
-  animatePantryPage(outgoing, direction);
-  requestAnimationFrame(() => {
-    const activeTab = [...document.querySelectorAll(".pantry-category-tab")].find(
-      (tab) => tab.dataset.pantryCategory === s.pantryCategory,
-    );
-    activeTab?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
-  });
-}
-function animatePantryPage(outgoing, direction) {
-  const incoming = document.querySelector("#pantry-section .pantry-page"),
-    host = incoming?.parentElement;
-  if (
-    !outgoing ||
-    !incoming ||
-    !host ||
-    !incoming.animate ||
-    matchMedia("(prefers-reduced-motion: reduce)").matches
-  )
-    return;
-  const forward = direction > 0,
-    easing = "cubic-bezier(0.37, 0, 0.63, 1)",
-    options = { duration: 300, easing, fill: "both" };
-  host.classList.add("category-transitioning");
-  outgoing.classList.add("category-page-outgoing");
-  outgoing.setAttribute("aria-hidden", "true");
-  outgoing.style.top = `${incoming.offsetTop}px`;
-  host.insertBefore(outgoing, incoming);
-  const outgoingAnimation = outgoing.animate(
-      [
-        { transform: "translate3d(0,0,0)" },
-        { transform: `translate3d(${forward ? "-100%" : "100%"},0,0)` },
-      ],
-      options,
-    ),
-    incomingAnimation = incoming.animate(
-      [
-        { transform: `translate3d(${forward ? "100%" : "-100%"},0,0)` },
-        { transform: "translate3d(0,0,0)" },
-      ],
-      options,
-    );
-  Promise.allSettled([
-    outgoingAnimation.finished,
-    incomingAnimation.finished,
-  ]).then(() => {
-    outgoing.remove();
-    host.classList.remove("category-transitioning");
-  });
-}
+// Rows and pages are kept between renders, so gesture listeners are swapped
+// out each render instead of piling up.
+let pantrySwipeListeners = null,
+  pullListeners = null;
 function pantryCategorySwipes() {
+  pantrySwipeListeners?.abort();
+  pantrySwipeListeners = null;
   const surface = document.querySelector(".pantry-page-surface"),
     currentPage = surface?.querySelector(".pantry-page:not(.pantry-page-adjacent)");
   if (!surface || !currentPage || s.tab !== "pantry") return;
+  pantrySwipeListeners = new AbortController();
+  const { signal } = pantrySwipeListeners;
   let startX = 0,
     startY = 0,
     startTime = 0,
@@ -639,6 +669,7 @@ function pantryCategorySwipes() {
       holder = document.createElement("div");
     holder.className = "pantry-page pantry-page-adjacent";
     holder.setAttribute("aria-hidden", "true");
+    holder.dataset.transient = "";
     holder.innerHTML = `<ul class="item-list">${pantryRows(items)}${items.length ? "" : `<li class="empty-state">${category === "All" ? "Your pantry is empty." : "No items in this category."}</li>`}</ul>`;
     holder.style.transform = `translate3d(${nextDirection * 100}%,0,0)`;
     surface.append(holder);
@@ -662,15 +693,26 @@ function pantryCategorySwipes() {
         : `translate3d(${pageDirection * 100}%,0,0)`;
     });
     currentPage.style.transform = `translate3d(${displayedX}px,0,0)`;
+    indicatorTracking(true);
+    positionIndicator(
+      nextPage ? PANTRY_CATEGORIES[categoryIndex() + nextDirection] : null,
+      Math.min(Math.abs(displayedX) / width, 1),
+    );
   };
   const flushDragFrame = () => {
     if (!dragFrame) return;
     cancelAnimationFrame(dragFrame);
     paintDrag(pendingX);
   };
+  const indicatorTracking = (on) =>
+    surface.parentElement
+      .querySelector(".category-indicator")
+      ?.classList.toggle("tracking", on);
   const clearDrag = () => {
     if (dragFrame) cancelAnimationFrame(dragFrame);
     dragFrame = 0;
+    indicatorTracking(false);
+    positionIndicator();
     currentPage.style.transform = "";
     currentPage.classList.remove("dragging-page");
     adjacentPages.forEach((page, pageDirection) => {
@@ -698,12 +740,8 @@ function pantryCategorySwipes() {
       reduced = matchMedia("(prefers-reduced-motion: reduce)").matches,
       currentTarget = commit ? -direction * width : 0,
       adjacentTarget = commit ? 0 : direction * width,
-      duration = reduced ? 0 : commit ? 260 : 220,
-      options = {
-        duration,
-        easing: "cubic-bezier(0.37, 0, 0.63, 1)",
-        fill: "forwards",
-      },
+      duration = reduced ? 0 : commit ? 380 : 320,
+      options = { duration, easing: SPRING, fill: "forwards" },
       animations = [
         currentPage.animate(
           [
@@ -713,6 +751,13 @@ function pantryCategorySwipes() {
           options,
         ),
       ];
+    // The underline finishes its move alongside the pages.
+    indicatorTracking(false);
+    positionIndicator(
+      commit ? PANTRY_CATEGORIES[categoryIndex() + direction] : null,
+      commit ? 1 : 0,
+    );
+    if (commit) haptic(8);
     if (adjacentPage)
       animations.push(
         adjacentPage.animate(
@@ -725,6 +770,9 @@ function pantryCategorySwipes() {
       );
     Promise.allSettled(animations.map((animation) => animation.finished)).then(
       () => {
+        // The page element is reused by the next render, so drop the
+        // animation's fill instead of leaving it translated.
+        animations.forEach((animation) => animation.cancel());
         if (!commit) return clearDrag();
         s.pantryCategory = PANTRY_CATEGORIES[categoryIndex() + direction];
         s.query = "";
@@ -754,7 +802,7 @@ function pantryCategorySwipes() {
     pointerId = event.pointerId;
     horizontal = false;
     vertical = false;
-  });
+  }, { signal });
   surface.addEventListener("pointermove", (event) => {
     if (event.pointerId !== pointerId || vertical) return;
     const dx = event.clientX - startX,
@@ -773,9 +821,9 @@ function pantryCategorySwipes() {
     event.preventDefault();
     pendingX = dx;
     if (!dragFrame) dragFrame = requestAnimationFrame(() => paintDrag(pendingX));
-  });
-  surface.addEventListener("pointerup", finish);
-  surface.addEventListener("pointercancel", finish);
+  }, { signal });
+  surface.addEventListener("pointerup", finish, { signal });
+  surface.addEventListener("pointercancel", finish, { signal });
   surface.addEventListener(
     "click",
     (event) => {
@@ -783,7 +831,7 @@ function pantryCategorySwipes() {
       event.preventDefault();
       event.stopPropagation();
     },
-    true,
+    { capture: true, signal },
   );
   // Built on first touch rather than on every render.
   function prepareAdjacentPages() {
@@ -828,18 +876,224 @@ function scheduleRender() {
     render();
   });
 }
-function render() {
+// Updates the page to match new markup, keeping the elements that didn't
+// change (and their focus, scroll, and listeners). Rows are matched by
+// data-id so a reordered list moves rows instead of rebuilding them.
+function patch(html) {
+  const next = document.createElement("template");
+  next.innerHTML = html;
+  patchChildren(root, next.content);
+}
+function patchChildren(from, to) {
+  // Swipe pages aren't part of the markup; ripples are left to finish.
+  const kept = (node) => node?.nodeType === 1 && node.dataset.transient === "keep";
+  [...from.children].forEach(
+    (child) =>
+      child.hasAttribute("data-transient") && !kept(child) && child.remove(),
+  );
+  const keyed = new Map();
+  for (const child of from.children)
+    if (child.dataset.id) keyed.set(child.dataset.id, child);
+  let cursor = from.firstChild;
+  for (const node of [...to.childNodes]) {
+    while (kept(cursor)) cursor = cursor.nextSibling;
+    const key = node.nodeType === 1 ? node.dataset.id : undefined;
+    let match = null;
+    if (key) match = keyed.get(key) || null;
+    else if (
+      cursor &&
+      cursor.nodeName === node.nodeName &&
+      !(cursor.nodeType === 1 && cursor.dataset.id)
+    )
+      match = cursor;
+    if (!match) {
+      from.insertBefore(node, cursor);
+      continue;
+    }
+    keyed.delete(key);
+    if (match === cursor) cursor = cursor.nextSibling;
+    else from.insertBefore(match, cursor);
+    patchNode(match, node);
+  }
+  while (cursor) {
+    const nextSibling = cursor.nextSibling;
+    if (!kept(cursor)) cursor.remove();
+    cursor = nextSibling;
+  }
+}
+function patchNode(from, to) {
+  if (from.nodeType !== 1) {
+    if (from.nodeValue !== to.nodeValue) from.nodeValue = to.nodeValue;
+    return;
+  }
+  // Rows mid swipe-out are swapped for fresh ones rather than sliding back.
+  if (
+    from.nodeName !== to.nodeName ||
+    from.id !== to.id ||
+    from.classList.contains("completing") ||
+    from.classList.contains("moving-left")
+  )
+    return from.replaceWith(to);
+  if (
+    from.nodeName === "INPUT" &&
+    from !== document.activeElement &&
+    from.value !== (to.getAttribute("value") ?? "")
+  )
+    from.value = to.getAttribute("value") ?? "";
+  if (from.isEqualNode(to)) return;
+  // data-live-style elements are positioned from script, so keep their style.
+  const live = from.hasAttribute("data-live-style");
+  for (const { name } of [...from.attributes])
+    if (!to.hasAttribute(name) && !(live && name === "style"))
+      from.removeAttribute(name);
+  for (const { name, value } of to.attributes)
+    if (from.getAttribute(name) !== value) from.setAttribute(name, value);
+  patchChildren(from, to);
+}
+function render({ animate = true } = {}) {
   if (renderFrame) {
     cancelAnimationFrame(renderFrame);
     renderFrame = 0;
   }
-  const previous = captureLayout();
-  if (!s.authKnown && !PREVIEW) return gate();
-  if (!s.actor && !PREVIEW) return gate();
-  if (s.history) return renderHistory();
+  const previous = animate ? captureLayout() : { positions: new Map() };
+  // Someone who was signed in last time sees the lists loading, not sign-in.
+  if (!PREVIEW && (s.authKnown ? !s.actor : !wasSignedIn)) return gate();
   app();
   animateLayout(previous);
   revealPendingItem();
+  positionIndicator();
+  updateChrome();
+}
+// Screen changes run inside a view transition where the browser has one;
+// CSS picks the animation from data-vt and --vt-dir.
+function transition(type, direction, update) {
+  if (!document.startViewTransition || reducedMotion()) return update();
+  const html = document.documentElement;
+  html.dataset.vt = type;
+  html.style.setProperty("--vt-dir", String(direction));
+  const clear = () => delete html.dataset.vt;
+  document.startViewTransition(update).finished.then(clear, clear);
+}
+// The pantry category underline, optionally part-way to a neighbour while a
+// page is being dragged.
+function positionIndicator(to = null, progress = 0) {
+  const nav = document.querySelector(".pantry-categories"),
+    bar = nav?.querySelector(".category-indicator");
+  if (!bar) return;
+  const tab = (category) =>
+      nav.querySelector(`[data-pantry-category="${CSS.escape(category)}"]`),
+    a = tab(s.pantryCategory),
+    b = (to && tab(to)) || a;
+  if (!a) return;
+  const x = a.offsetLeft + (b.offsetLeft - a.offsetLeft) * progress,
+    width = a.offsetWidth + (b.offsetWidth - a.offsetWidth) * progress,
+    placed = Boolean(bar.style.width);
+  if (!placed) bar.style.transition = "none";
+  bar.style.transform = `translateX(${x}px)`;
+  bar.style.width = `${width}px`;
+  if (!placed) {
+    bar.offsetWidth;
+    bar.style.transition = "";
+  }
+}
+// Status bar tint follows the row under it; the iOS status bar scrim shows
+// once the page has scrolled.
+const themeColor = document.querySelector('meta[name="theme-color"]');
+let chromeFrame = 0;
+function updateChrome() {
+  chromeFrame = 0;
+  const top = document.elementFromPoint(innerWidth / 2, 1),
+    band = top?.closest?.(".item-row")?.style.getPropertyValue("--band-top"),
+    color = band || "#17242d";
+  if (themeColor && themeColor.content !== color) themeColor.content = color;
+  document.documentElement.classList.toggle("scrolled", scrollY > 2);
+}
+addEventListener(
+  "scroll",
+  () => {
+    if (!chromeFrame) chromeFrame = requestAnimationFrame(updateChrome);
+  },
+  { passive: true },
+);
+// Editor and confirmations: sheets on phones (the editor always, confirms on
+// iOS), scale-and-fade dialogs elsewhere. Entry is CSS; exit is played here
+// before the state that removes them is cleared.
+const isSheet = (backdrop) =>
+  phone() && (backdrop.classList.contains("editor") || platform === "ios");
+function dismissDialogs(selector = ".dialog-backdrop") {
+  const backdrops = [...document.querySelectorAll(selector)];
+  if (!backdrops.length || reducedMotion()) {
+    sheetBackground(false, 0);
+    return Promise.resolve();
+  }
+  return Promise.all(
+    backdrops.map((backdrop) => {
+      backdrop.style.pointerEvents = "none";
+      const dialog = backdrop.querySelector(".dialog"),
+        sheet = isSheet(backdrop),
+        from = getComputedStyle(dialog).transform,
+        animations = [
+          backdrop.animate([{ opacity: 1 }, { opacity: 0 }], {
+            duration: 240,
+            easing: "ease",
+            fill: "forwards",
+          }),
+          dialog.animate(
+            sheet
+              ? [
+                  { transform: from === "none" ? "translateY(0)" : from },
+                  { transform: "translateY(100%)" },
+                ]
+              : [
+                  { opacity: 1, transform: "none" },
+                  { opacity: 0, transform: "scale(0.96)" },
+                ],
+            { duration: sheet ? 260 : 150, easing: EASE_IN, fill: "forwards" },
+          ),
+        ];
+      if (backdrop.classList.contains("editor"))
+        animations.push(...sheetBackground(false));
+      return Promise.all(animations.map((a) => a.finished)).catch(() => {});
+    }),
+  );
+}
+// iOS sheets push the page behind them back and round its corners.
+let sheetBackgroundAnimation = null;
+function sheetBackground(opening, duration = opening ? 460 : 260) {
+  const main = document.querySelector(".list-main");
+  if (!main || platform !== "ios" || !phone()) return [];
+  if (!opening && !sheetBackgroundAnimation) return [];
+  const top = -main.getBoundingClientRect().top,
+    bottom = main.offsetHeight - top - innerHeight,
+    frame = (scale, radius) => ({
+      transform: `scale(${scale})`,
+      clipPath: `inset(${top}px 0 ${bottom}px 0 round ${radius}px)`,
+    });
+  main.style.transformOrigin = `50% ${top + innerHeight / 2}px`;
+  const animation = main.animate(
+    opening
+      ? [frame(1, 0), frame(0.93, 14)]
+      : [frame(0.93, 14), frame(1, 0)],
+    {
+      duration: reducedMotion() ? 0 : duration,
+      easing: opening ? SPRING : EASE_IN,
+      fill: "forwards",
+    },
+  );
+  if (opening) {
+    sheetBackgroundAnimation?.cancel();
+    sheetBackgroundAnimation = animation;
+  } else {
+    const previous = sheetBackgroundAnimation;
+    sheetBackgroundAnimation = null;
+    previous?.cancel();
+    const done = () => {
+      animation.cancel();
+      main.style.transformOrigin = "";
+    };
+    animation.finished.then(done, done);
+  }
+  return [animation];
 }
 function open(x = null) {
   s.editId = x?.id || null;
@@ -854,15 +1108,138 @@ function open(x = null) {
   s.editor = true;
   window.history.pushState({ editor: true }, "");
   render();
+  sheetBackground(true);
   setTimeout(() => document.getElementById("desc")?.focus(), 0);
 }
-function close(fromPop = false) {
+let closing = false;
+async function close(fromPop = false) {
+  if (!s.editor || closing) return;
+  closing = true;
+  if (!fromPop && window.history.state?.editor) window.history.back();
+  await dismissDialogs();
+  closing = false;
   s.editor = false;
+  s.del = false;
   s.editId = null;
   s.error = "";
   s.saving = false;
-  if (!fromPop && window.history.state?.editor) window.history.back();
   render();
+}
+// Dragging the top of the editor sheet down dismisses it.
+function dragSheet(event) {
+  const dialog = event.target.closest(".editor .dialog");
+  if (!dialog || !phone() || event.button !== 0) return;
+  if (event.clientY - dialog.getBoundingClientRect().top > 72) return;
+  if (event.target.closest("button, input")) return;
+  const backdrop = dialog.parentElement,
+    startY = event.clientY,
+    tracker = velocityTracker();
+  let offset = 0;
+  const move = (q) => {
+      const dy = q.clientY - startY;
+      offset = dy > 0 ? dy : dy * 0.2;
+      tracker.add(0, dy);
+      dialog.style.transform = `translateY(${offset}px)`;
+      backdrop.style.backgroundColor = `rgba(6, 16, 22, ${0.72 * (1 - Math.min(Math.max(offset, 0) / dialog.offsetHeight, 1))})`;
+    },
+    up = () => {
+      removeEventListener("pointermove", move);
+      removeEventListener("pointerup", up);
+      removeEventListener("pointercancel", up);
+      if (offset > 110 || tracker.velocity().y > FLICK_SPEED) return void close();
+      backdrop.style.backgroundColor = "";
+      const from = dialog.style.transform || "translateY(0)";
+      dialog.style.transform = "";
+      dialog.animate([{ transform: from }, { transform: "translateY(0)" }], {
+        duration: 380,
+        easing: SPRING,
+      });
+    };
+  addEventListener("pointermove", move);
+  addEventListener("pointerup", up);
+  addEventListener("pointercancel", up);
+}
+// History slides over Settings: an iOS push with the page behind shifting
+// and dimming, or Material's shared-axis slide and fade elsewhere.
+let historyAnimations = [],
+  historyClosing = false,
+  historyDraggedOut = false;
+function historyFrames(p) {
+  if (platform === "ios")
+    return [
+      { transform: `translateX(${(1 - p) * 100}%)` },
+      {
+        transform: `translateX(${-25 * p}%)`,
+        filter: `brightness(${1 - 0.35 * p})`,
+      },
+    ];
+  return [
+    { opacity: p, transform: `translateX(${(1 - p) * 30}px)` },
+    { opacity: 1 - p, transform: `translateX(${-30 * p}px)` },
+  ];
+}
+function animateHistory(from, to, duration = 440, easing = SPRING) {
+  const layer = document.getElementById("historyLayer"),
+    shell = document.querySelector(".app-shell");
+  if (!layer || !shell) return Promise.resolve();
+  const [layerFrom, shellFrom] = historyFrames(from),
+    [layerTo, shellTo] = historyFrames(to),
+    options = { duration: reducedMotion() ? 0 : duration, easing, fill: "forwards" },
+    next = [
+      layer.animate([layerFrom, layerTo], options),
+      shell.animate([shellFrom, shellTo], options),
+    ];
+  historyAnimations.forEach((animation) => animation.cancel());
+  historyAnimations = next;
+  return Promise.all(next.map((animation) => animation.finished)).catch(
+    () => {},
+  );
+}
+function openHistory() {
+  s.history = true;
+  window.history.pushState({ history: true }, "");
+  render();
+  animateHistory(0, 1);
+}
+async function closeHistory() {
+  if (historyClosing) return;
+  historyClosing = true;
+  if (!historyDraggedOut) await animateHistory(1, 0, 340);
+  historyDraggedOut = false;
+  s.history = false;
+  render();
+  historyAnimations.forEach((animation) => animation.cancel());
+  historyAnimations = [];
+  historyClosing = false;
+}
+// iOS home-screen apps have no system back swipe, so History gets its own
+// from the left edge.
+function edgeSwipeBack(event) {
+  if (!s.history || platform !== "ios" || event.clientX > 28) return;
+  const layer = document.getElementById("historyLayer");
+  if (!layer?.contains(event.target)) return;
+  const startX = event.clientX,
+    tracker = velocityTracker();
+  let progress = 1;
+  const move = (q) => {
+      const dx = Math.max(q.clientX - startX, 0);
+      tracker.add(dx);
+      progress = 1 - Math.min(dx / innerWidth, 1);
+      animateHistory(progress, progress, 0);
+    },
+    up = async () => {
+      removeEventListener("pointermove", move);
+      removeEventListener("pointerup", up);
+      removeEventListener("pointercancel", up);
+      if (progress < 0.65 || tracker.velocity().x > 0.5) {
+        await animateHistory(progress, 0, 300);
+        historyDraggedOut = true;
+        window.history.back();
+      } else animateHistory(progress, 1, 300);
+    };
+  addEventListener("pointermove", move);
+  addEventListener("pointerup", up);
+  addEventListener("pointercancel", up);
 }
 async function save() {
   if (s.saving) return;
@@ -894,11 +1271,10 @@ async function save() {
   }
   try {
     if (x) {
-      const patch = { description: desc, quantity: qty };
-      if (list === "pantry") patch.category = category;
-      if (PREVIEW) local("updated", x, patch);
-      else
-        await window.JamjarFirebase?.updateItem(x.id, patch);
+      const changes = { description: desc, quantity: qty };
+      if (list === "pantry") changes.category = category;
+      if (PREVIEW) local("updated", x, changes);
+      else await api?.updateItem(x.id, changes);
     } else {
       const n = {
         id: crypto.randomUUID(),
@@ -914,7 +1290,7 @@ async function save() {
       s.revealId = n.id;
       if (PREVIEW) local("added", n);
       else
-        await window.JamjarFirebase?.addItem({
+        await api?.addItem({
           id: n.id,
           description: desc,
           quantity: qty,
@@ -954,7 +1330,7 @@ async function toggle(x) {
   s.items = s.items.map((item) => (item.id === x.id ? next : item));
   render();
   try {
-    toast(message, await window.JamjarFirebase?.toggleBought(x));
+    toast(message, await api?.toggleBought(x));
   } catch (error) {
     console.error("Jamjar bought update failed", error);
     s.items = s.items.map((item) => (item.id === x.id ? x : item));
@@ -971,8 +1347,9 @@ async function move(x, to) {
           x.description.trim().toLowerCase(),
     )
   ) {
-    s.status = `Already in ${listLabel(to)}`;
-    return render();
+    render();
+    toast(`${x.description} is already in ${listLabel(to)}.`);
+    return false;
   }
   const message = `Moved ${quoted(x)} to ${listLabel(to)}`;
   if (PREVIEW) {
@@ -999,7 +1376,7 @@ async function move(x, to) {
   s.items = s.items.map((item) => (item.id === x.id ? next : item));
   render();
   try {
-    toast(message, await window.JamjarFirebase?.moveItem(x, to));
+    toast(message, await api?.moveItem(x, to));
     return true;
   } catch (error) {
     console.error("Jamjar move failed", error);
@@ -1009,24 +1386,32 @@ async function move(x, to) {
     return false;
   }
 }
-async function remove() {
-  const x = s.items.find((i) => i.id === s.editId);
+// Swipe-deletes skip the confirmation; the toast offers Undo instead.
+async function remove(x = s.items.find((i) => i.id === s.editId)) {
   if (!x) return;
+  if (s.editor || s.del) {
+    closing = true;
+    if (window.history.state?.editor) window.history.back();
+    await dismissDialogs();
+    closing = false;
+  }
   let log = null,
     failed = false;
   try {
-    log = PREVIEW
-      ? local("deleted", x)
-      : await window.JamjarFirebase?.deleteItem(x);
+    if (PREVIEW) log = local("deleted", x);
+    else {
+      s.items = s.items.filter((item) => item.id !== x.id);
+      log = await api?.deleteItem(x);
+    }
   } catch (error) {
     console.error("Jamjar delete failed", error);
+    s.items = [...s.items, x];
     failed = true;
   }
   s.del = false;
   s.editor = false;
   s.editId = null;
   s.saving = false;
-  if (window.history.state?.editor) window.history.back();
   render();
   if (failed) toast("Couldn’t delete that item. Try again.");
   else toast(`Deleted ${quoted(x)}`, log);
@@ -1035,6 +1420,7 @@ async function clearAll() {
   const source = s.clearList,
     items = listDone(source),
     label = `${items.length} completed ${items.length === 1 ? "item" : "items"}`;
+  await dismissDialogs(".dialog-backdrop.confirm");
   let log = null,
     failed = false;
   try {
@@ -1048,7 +1434,7 @@ async function clearAll() {
         items,
         [],
       );
-    } else log = await window.JamjarFirebase?.clearCompleted(items, source);
+    } else log = await api?.clearCompleted(items, source);
   } catch (error) {
     console.error("Jamjar clear failed", error);
     failed = true;
@@ -1064,15 +1450,78 @@ toastHost.setAttribute("role", "status");
 toastHost.setAttribute("aria-live", "polite");
 document.body.append(toastHost);
 let toastTimer = 0;
-function hideToast() {
+// On Android the + button rises above the full-width snackbar.
+function toastSpace(el) {
+  const html = document.documentElement;
+  html.classList.toggle("toast-shown", Boolean(el));
+  if (el) html.style.setProperty("--toast-space", `${el.offsetHeight + 12}px`);
+}
+function hideToast({ animate = true, to = "translateY(24px)" } = {}) {
   clearTimeout(toastTimer);
   toastTimer = 0;
-  toastHost.replaceChildren();
+  const el = toastHost.firstElementChild;
+  toastSpace(null);
+  if (!el) return;
+  if (!animate || reducedMotion()) return toastHost.replaceChildren();
+  el.style.pointerEvents = "none";
+  const from = getComputedStyle(el).transform;
+  el.animate(
+    [
+      { opacity: 1, transform: from === "none" ? "none" : from },
+      { opacity: 0, transform: to },
+    ],
+    { duration: 200, easing: EASE_IN, fill: "forwards" },
+  ).finished.then(
+    () => el.isConnected && el.remove(),
+    () => {},
+  );
+}
+// Toasts can be swiped away sideways.
+function swipeToast(el, restart) {
+  el.addEventListener("pointerdown", (down) => {
+    if (down.target.closest("button") || down.button !== 0) return;
+    const tracker = velocityTracker();
+    let dx = 0;
+    clearTimeout(toastTimer);
+    el.setPointerCapture(down.pointerId);
+    const move = (q) => {
+        dx = q.clientX - down.clientX;
+        tracker.add(dx);
+        el.style.transform = `translateX(${dx}px)`;
+        el.style.opacity = String(1 - Math.min(Math.abs(dx) / 240, 0.6));
+      },
+      up = () => {
+        el.removeEventListener("pointermove", move);
+        el.removeEventListener("pointerup", up);
+        el.removeEventListener("pointercancel", up);
+        const speed = tracker.velocity().x;
+        if (Math.abs(dx) > 80 || Math.abs(speed) > 0.5)
+          return hideToast({
+            to: `translateX(${Math.sign(dx || speed) * 120}%)`,
+          });
+        const from = el.style.transform;
+        el.style.transform = "";
+        el.style.opacity = "";
+        el.animate([{ transform: from }, { transform: "none" }], {
+          duration: 380,
+          easing: SPRING,
+        });
+        restart();
+      };
+    el.addEventListener("pointermove", move);
+    el.addEventListener("pointerup", up);
+    el.addEventListener("pointercancel", up);
+  });
 }
 function toast(message, log = null) {
   clearTimeout(toastTimer);
   toastHost.innerHTML = `<div class="toast"><span>${e(message)}</span>${log ? '<button type="button" class="toast-undo">Undo</button>' : ""}</div>`;
-  toastHost.querySelector(".toast-undo")?.addEventListener("click", async (event) => {
+  const el = toastHost.firstElementChild,
+    restart = () =>
+      (toastTimer = setTimeout(hideToast, log ? 6000 : 4000));
+  toastSpace(el);
+  swipeToast(el, restart);
+  el.querySelector(".toast-undo")?.addEventListener("click", async (event) => {
     const button = event.currentTarget;
     clearTimeout(toastTimer);
     button.disabled = true;
@@ -1085,7 +1534,7 @@ function toast(message, log = null) {
       toast(undoError(error));
     }
   });
-  toastTimer = setTimeout(hideToast, log ? 6000 : 4000);
+  restart();
 }
 const undoError = (error) =>
   ["jamjar/conflict", "unavailable"].includes(error?.code)
@@ -1095,7 +1544,7 @@ async function undo(log) {
   if (PREVIEW) {
     undoLocal(log);
     render();
-  } else await window.JamjarFirebase?.undoAction(log);
+  } else await api?.undoAction(log);
 }
 function undoLocal(log) {
   const before = (log.beforeItems || []).map(itemSnapshot),
@@ -1121,34 +1570,61 @@ function undoLocal(log) {
     { targetAction: log.action, targetHistoryId: log.id },
   );
 }
-function swipes(scope = document) {
-  scope.querySelectorAll(".swipe-wrap").forEach((w) => {
-    const b = w.querySelector(".item-row"),
-      primary = w.querySelector(".swipe-underlay.primary"),
-      l = primary?.querySelector(".under-label"),
-      ii = primary?.querySelector(".under-icon"),
-      x = s.items.find((v) => v.id === w.dataset.id);
+// Rows survive renders, so each is bound once and looks its item up when
+// touched rather than holding on to the item it was first drawn with.
+const boundRows = new WeakSet();
+const itemFor = (row) => s.items.find((v) => v.id === row.dataset.id);
+const SWIPE_THRESHOLD = 64,
+  SWIPE_REST = 112,
+  FLICK_SPEED = 0.6;
+// Past the delete threshold the row drags with resistance.
+const rubberBand = (value) =>
+  value < -SWIPE_REST ? -SWIPE_REST + (value + SWIPE_REST) * 0.35 : value;
+function swipes() {
+  document.querySelectorAll(".swipe-wrap").forEach((w) => {
+    const b = w.querySelector(".item-row");
+    if (!b || boundRows.has(b)) return;
+    boundRows.add(b);
+    const tracker = velocityTracker();
     let start = 0,
       startY = 0,
       last = 0,
       pending = 0,
       paintFrame = 0,
+      stage = "",
       drag = false,
       horizontal = false,
       vertical = false;
-    if (!x) return;
-    if (x.list === "pantry") {
-      b.onclick = () => open(x);
+    if (w.classList.contains("pantry-row")) {
+      b.onclick = () => {
+        const x = itemFor(w);
+        if (x) open(x);
+      };
       return;
     }
+    const stageFor = (x, value) =>
+      x.list === "grocery" && value >= innerWidth * 0.5
+        ? "transfer"
+        : value >= SWIPE_THRESHOLD
+          ? "primary"
+          : value <= -SWIPE_THRESHOLD
+            ? "delete"
+            : "";
+    const reset = () => {
+      if (paintFrame) cancelAnimationFrame(paintFrame);
+      paintFrame = 0;
+      stage = "";
+      b.classList.remove("dragging");
+      w.classList.remove("swiping-right", "swiping-left", "armed");
+    };
     b.onpointerdown = (q) => {
       if (q.button !== 0) return;
       start = q.clientX;
       startY = q.clientY;
       last = 0;
       pending = 0;
-      if (paintFrame) cancelAnimationFrame(paintFrame);
-      paintFrame = 0;
+      reset();
+      tracker.reset();
       drag = false;
       horizontal = false;
       vertical = false;
@@ -1156,9 +1632,10 @@ function swipes(scope = document) {
     };
     b.onpointermove = (q) => {
       if (!b.hasPointerCapture(q.pointerId) || vertical) return;
+      const x = itemFor(w);
+      if (!x) return;
       const raw = q.clientX - start,
-        y = q.clientY - startY,
-        next = raw;
+        y = q.clientY - startY;
       if (!horizontal && Math.abs(y) > 8 && Math.abs(y) > Math.abs(raw)) {
         vertical = true;
         drag = true;
@@ -1168,73 +1645,87 @@ function swipes(scope = document) {
         horizontal = true;
       if (!horizontal) return;
       q.preventDefault();
-      last = next;
-      pending = next;
+      tracker.add(raw);
+      last = raw;
+      pending = rubberBand(raw);
       drag = true;
       b.classList.add("dragging");
+      // A tick each time the release action changes, like native swipe actions.
+      const nextStage = stageFor(x, raw);
+      if (nextStage !== stage) {
+        if (nextStage) haptic(8);
+        stage = nextStage;
+      }
       if (!paintFrame)
         paintFrame = requestAnimationFrame(() => {
           paintFrame = 0;
           const value = pending,
-            transfer = x.list === "grocery" && value >= innerWidth * 0.5;
+            transfer = stage === "transfer",
+            primary = w.querySelector(".swipe-underlay.primary"),
+            l = primary?.querySelector(".under-label"),
+            ii = primary?.querySelector(".under-icon");
           b.style.transform = `translate3d(${value}px,0,0)`;
           w.classList.toggle("swiping-right", value > 12);
           w.classList.toggle("swiping-left", value < -12);
+          w.classList.toggle("armed", Boolean(stage));
           primary?.classList.toggle("is-transfer", transfer);
-          if (l)
-            l.textContent = transfer
-              ? "Move to Pantry"
-              : x.completed
-                ? "Restore"
-                : "Bought";
-          if (ii) ii.innerHTML = I(transfer ? "archive" : "check");
+          const label = transfer ? "Move to Pantry" : x.completed ? "Restore" : "Bought";
+          if (l && l.textContent !== label) l.textContent = label;
+          if (ii && ii.dataset.icon !== String(transfer)) {
+            ii.dataset.icon = String(transfer);
+            ii.innerHTML = I(transfer ? "archive" : "check");
+          }
         });
     };
     b.onpointerup = (q) => {
-      if (paintFrame) cancelAnimationFrame(paintFrame);
-      paintFrame = 0;
       if (b.hasPointerCapture(q.pointerId))
         b.releasePointerCapture(q.pointerId);
-      b.classList.remove("dragging");
-      w.classList.remove("swiping-right", "swiping-left");
-      if (x.list === "grocery" && last >= innerWidth * 0.5) {
-        b.classList.add("completing");
-        navigator.vibrate?.(12);
-        return setTimeout(() => move(x, "pantry"), 180);
-      }
-      if ((x.list === "grocery" || x.list === "shopping") && last >= 64) {
-        b.classList.add("completing");
-        navigator.vibrate?.(12);
-        return setTimeout(() => toggle(x), 180);
-      }
-      if ((x.list === "grocery" || x.list === "shopping") && last <= -64) {
-        b.classList.add("moving-left");
-        navigator.vibrate?.(12);
-        return setTimeout(() => {
-          s.editId = x.id;
-          s.del = true;
-          render();
-        }, 180);
-      }
-      b.style.transform = "";
+      const armed = stage;
+      reset();
+      const x = itemFor(w);
+      if (!x || !horizontal) return (b.style.transform = "");
+      // A quick flick counts even when it's short of the threshold.
+      const speed = tracker.velocity().x,
+        flick = Math.abs(speed) > FLICK_SPEED && Math.abs(last) > 24,
+        action =
+          armed ||
+          (flick && Math.sign(speed) === Math.sign(last)
+            ? speed > 0
+              ? "primary"
+              : "delete"
+            : "");
+      if (!action) return (b.style.transform = "");
+      if (!armed) haptic(12);
+      b.classList.add(action === "delete" ? "moving-left" : "completing");
+      setTimeout(
+        () =>
+          action === "transfer"
+            ? move(x, "pantry")
+            : action === "primary"
+              ? toggle(x)
+              : remove(x),
+        180,
+      );
     };
     b.onpointercancel = () => {
-      if (paintFrame) cancelAnimationFrame(paintFrame);
-      paintFrame = 0;
-      b.classList.remove("dragging");
-      w.classList.remove("swiping-right", "swiping-left");
+      reset();
       b.style.transform = "";
     };
     b.onclick = () => {
-      if (!drag) open(x);
+      const x = itemFor(w);
+      if (!drag && x) open(x);
     };
   });
 }
 function pullToClear() {
+  pullListeners?.abort();
+  pullListeners = null;
   const list = s.tab === "shopping" ? "shopping" : "grocery",
     section = document.getElementById(`${list}-section`),
     indicator = document.getElementById("clearPull");
   if (!section || !indicator) return;
+  pullListeners = new AbortController();
+  const { signal } = pullListeners;
   const threshold = 72;
   let startX = 0,
     startY = 0,
@@ -1251,9 +1742,11 @@ function pullToClear() {
   const show = (value) => {
     amount = Math.max(0, Math.min(value, 96));
     indicator.style.transform = `translateY(${64 - Math.min(amount, 64)}px)`;
+    indicator.style.setProperty("--pull", String(Math.min(amount / threshold, 1)));
     const armed = amount >= threshold;
+    if (armed && !indicator.classList.contains("armed")) haptic(10);
     indicator.classList.toggle("armed", armed);
-    indicator.querySelector("span").textContent = armed
+    indicator.querySelector(".pull-label").textContent = armed
       ? "Release to clear completed"
       : "Pull up to clear completed";
   };
@@ -1277,7 +1770,7 @@ function pullToClear() {
       amount = 0;
       tracking = true;
     },
-    { passive: true },
+    { passive: true, signal },
   );
   section.addEventListener(
     "touchmove",
@@ -1290,10 +1783,10 @@ function pullToClear() {
       event.preventDefault();
       show(up);
     },
-    { passive: false },
+    { passive: false, signal },
   );
-  section.addEventListener("touchend", finish);
-  section.addEventListener("touchcancel", finish);
+  section.addEventListener("touchend", finish, { signal });
+  section.addEventListener("touchcancel", finish, { signal });
   section.addEventListener("pointerdown", (event) => {
     if (
       event.pointerType !== "mouse" ||
@@ -1305,123 +1798,122 @@ function pullToClear() {
     startY = event.clientY;
     amount = 0;
     tracking = true;
-  });
+  }, { signal });
   section.addEventListener("pointermove", (event) => {
     if (!tracking || event.pointerType !== "mouse") return;
     const up = startY - event.clientY,
       sideways = Math.abs(startX - event.clientX);
     if (up > 0 && up > sideways) show(up);
-  });
-  section.addEventListener("pointerup", finish);
-  section.addEventListener("pointercancel", finish);
+  }, { signal });
+  section.addEventListener("pointerup", finish, { signal });
+  section.addEventListener("pointercancel", finish, { signal });
 }
-function bind() {
-  document.querySelectorAll("[data-tab]").forEach(
-    (b) =>
-      (b.onclick = () => {
-        const next = b.dataset.tab;
-        if (innerWidth <= 680 && next === s.tab && next !== "settings") {
-          s.oneHanded = !s.oneHanded;
-          document
-            .querySelector(".app-shell")
-            ?.classList.toggle("one-handed", s.oneHanded);
-          return scrollTabTop();
-        }
-        if (next === s.tab) return;
-        const mobile = innerWidth <= 680;
-        s.oneHanded = false;
-        s.query = "";
-        s.tab = next;
-        render();
-        if (mobile) scrollTabTop();
-      }),
-  );
-  document.getElementById("add")?.addEventListener("click", () => open());
-  document.querySelectorAll("[data-pantry-category]").forEach((button) => {
-    button.addEventListener("click", () => {
-      if (button.dataset.pantryCategory === s.pantryCategory) return;
-      const scrollLeft = button.parentElement.scrollLeft;
-      s.pantryCategory = button.dataset.pantryCategory;
-      s.query = "";
-      render();
-      requestAnimationFrame(() => {
-        const tabs = document.querySelector(".pantry-categories");
-        if (tabs) tabs.scrollLeft = scrollLeft;
-      });
-    });
-  });
-  document.querySelectorAll("[data-item-category]").forEach((button) => {
-    button.addEventListener("click", () => {
-      s.itemCategory = button.dataset.itemCategory;
-      document.querySelectorAll("[data-item-category]").forEach((choice) => {
-        const selected = choice.dataset.itemCategory === s.itemCategory;
-        choice.classList.toggle("active", selected);
-        choice.setAttribute("aria-pressed", String(selected));
-      });
-    });
-  });
-  document.getElementById("hist")?.addEventListener("click", () => {
-    s.history = true;
-    window.history.pushState({ history: true }, "");
+const TABS = ["grocery", "pantry", "shopping", "settings"];
+function selectTab(next) {
+  if (innerWidth <= 680 && next === s.tab && next !== "settings") {
+    s.oneHanded = !s.oneHanded;
+    document
+      .querySelector(".app-shell")
+      ?.classList.toggle("one-handed", s.oneHanded);
+    return scrollTabTop();
+  }
+  if (next === s.tab) return;
+  const mobile = innerWidth <= 680,
+    direction = Math.sign(TABS.indexOf(next) - TABS.indexOf(s.tab));
+  transition("tab", direction, () => {
+    s.oneHanded = false;
+    s.query = "";
+    s.tab = next;
     render();
+    if (mobile) scrollTo(0, 0);
   });
-  document
-    .getElementById("install")
-    ?.addEventListener("click", () => installPrompt?.prompt());
-  document
-    .getElementById("signout")
-    ?.addEventListener("click", () => window.JamjarFirebase?.signOut());
-  document.getElementById("search")?.addEventListener("input", (q) => {
-    s.query = q.target.value;
-    s.pantryCategory = "All";
-    updatePantryResults();
-  });
-  document.getElementById("clearSearch")?.addEventListener("click", () => {
+}
+const clicks = {
+  signin: () => api?.signIn(),
+  back: () => history.back(),
+  add: () => open(),
+  hist: () => openHistory(),
+  install: () => installPrompt?.prompt(),
+  signout: () => api?.signOut(),
+  clearSearch: () => {
     const search = document.getElementById("search");
     s.query = "";
     if (search) search.value = "";
-    updatePantryResults();
+    render({ animate: false });
     search?.focus();
-  });
-  document
-    .getElementById("desc")
-    ?.addEventListener("input", (q) => (s.desc = q.target.value));
-  document
-    .getElementById("qty")
-    ?.addEventListener("input", (q) => (s.qty = q.target.value));
-  document.getElementById("save")?.addEventListener("click", save);
-  document.getElementById("cancel")?.addEventListener("click", () => close());
-  document.getElementById("x")?.addEventListener("click", () => close());
-  document.getElementById("delAsk")?.addEventListener("click", () => {
+  },
+  save: () => save(),
+  cancel: () => close(),
+  x: () => close(),
+  delAsk: () => {
     s.del = true;
     render();
-  });
-  document.getElementById("clearNo")?.addEventListener("click", () => {
+  },
+  clearNo: async () => {
+    await dismissDialogs(".dialog-backdrop.confirm");
     s.clearList = "";
     render();
-  });
-  document.getElementById("clearYes")?.addEventListener("click", clearAll);
-  document.getElementById("delNo")?.addEventListener("click", () => {
+  },
+  clearYes: () => clearAll(),
+  delNo: async () => {
+    await dismissDialogs(".dialog-backdrop.confirm");
     s.del = false;
     render();
-  });
-  document.getElementById("delYes")?.addEventListener("click", remove);
-  pantryCategorySwipes();
-  bindRows();
-  pullToClear();
-}
-function bindRows(scope = document) {
-  swipes(scope);
-  scope.querySelectorAll("[data-move-to-groceries]").forEach((button) => {
-    button.addEventListener("click", (event) => {
-      event.stopPropagation();
-      const item = s.items.find(
-        (candidate) => candidate.id === button.dataset.moveToGroceries,
-      );
-      if (item) void move(item, "grocery");
+  },
+  delYes: () => remove(),
+};
+// One set of listeners on the root, since elements are kept across renders.
+root.addEventListener("click", (event) => {
+  const button = event.target.closest("button");
+  if (!button || !root.contains(button)) return;
+  const { tab, pantryCategory, itemCategory, moveToGroceries, undoId } =
+    button.dataset;
+  if (tab) return selectTab(tab);
+  if (pantryCategory) {
+    if (pantryCategory === s.pantryCategory) return;
+    const direction = Math.sign(
+      PANTRY_CATEGORIES.indexOf(pantryCategory) -
+        PANTRY_CATEGORIES.indexOf(s.pantryCategory),
+    );
+    return transition("category", direction, () => {
+      s.pantryCategory = pantryCategory;
+      s.query = "";
+      render();
     });
-  });
-}
+  }
+  if (itemCategory) {
+    s.itemCategory = itemCategory;
+    document.querySelectorAll("[data-item-category]").forEach((choice) => {
+      const selected = choice.dataset.itemCategory === s.itemCategory;
+      choice.classList.toggle("active", selected);
+      choice.setAttribute("aria-pressed", String(selected));
+    });
+    return;
+  }
+  if (moveToGroceries) {
+    const item = s.items.find((candidate) => candidate.id === moveToGroceries);
+    if (item) void move(item, "grocery");
+    return;
+  }
+  if (undoId) return void undoFromHistory(button);
+  clicks[button.id]?.();
+});
+root.addEventListener("pointerdown", (event) => {
+  ripple(event);
+  dragSheet(event);
+  edgeSwipeBack(event);
+});
+// iOS only applies :active press styles when a touch listener exists.
+addEventListener("touchstart", () => {}, { passive: true });
+root.addEventListener("input", (event) => {
+  const { id, value } = event.target;
+  if (id === "search") {
+    s.query = value;
+    s.pantryCategory = "All";
+    render({ animate: false });
+  } else if (id === "desc") s.desc = value;
+  else if (id === "qty") s.qty = value;
+});
 addEventListener("beforeinstallprompt", (q) => {
   q.preventDefault();
   installPrompt = q;
@@ -1429,11 +1921,8 @@ addEventListener("beforeinstallprompt", (q) => {
   render();
 });
 addEventListener("popstate", () => {
-  if (s.history) {
-    s.history = false;
-    return render();
-  }
-  if (s.editor) return close(true);
+  if (s.history) return void closeHistory();
+  if (s.editor) return void close(true);
 });
 addEventListener("keydown", (event) => {
   if (event.key !== "Escape" || !s.editor || s.del) return;
@@ -1445,13 +1934,16 @@ window.visualViewport?.addEventListener("scroll", syncVisualViewport);
 addEventListener("resize", syncVisualViewport);
 syncVisualViewport();
 if (!PREVIEW) {
-  addEventListener("jamjar:firebase-ready", () => {
-    s.ready = true;
-    render();
-  });
-  addEventListener("jamjar:auth", (q) => {
-    s.actor = q.detail;
+  const setActor = (user) => {
+    s.actor = user;
     s.authKnown = true;
+    try {
+      if (user) localStorage.setItem(SIGNED_IN_KEY, "1");
+      else localStorage.removeItem(SIGNED_IN_KEY);
+    } catch {}
+  };
+  addEventListener("jamjar:auth", (q) => {
+    setActor(q.detail);
     render();
   });
   addEventListener("jamjar:data", (q) => {
@@ -1462,30 +1954,37 @@ if (!PREVIEW) {
       nextStatus = q.detail.fromCache
         ? "Offline · changes will sync"
         : "Up to date",
-      statusChanged = s.status !== nextStatus;
+      statusChanged = s.status !== nextStatus,
+      firstLoad = !s.loaded;
+    s.loaded = true;
     s.items = nextItems;
     s.logs = nextLogs;
     if (s.undoPendingId && s.logs.some((log) => log.targetHistoryId === s.undoPendingId))
       s.undoPendingId = null;
     s.status = nextStatus;
-    if (itemsChanged || statusChanged || (logsChanged && (s.history || s.editor)))
+    if (
+      firstLoad ||
+      itemsChanged ||
+      statusChanged ||
+      (logsChanged && (s.history || s.editor))
+    )
       scheduleRender();
   });
   addEventListener("jamjar:write-error", (q) => toast(q.detail));
   addEventListener("jamjar:error", (q) => {
     s.status = q.detail || "Sync unavailable";
+    s.loaded = true;
     render();
   });
   import("./firebase-client.js")
-    .then(() => {
-      if (window.JamjarFirebase) s.ready = true;
-      if (window.JamjarCurrentUser !== undefined) {
-        s.actor = window.JamjarCurrentUser;
-        s.authKnown = true;
-      }
-      if (window.JamjarData) {
-        s.items = window.JamjarData.items || [];
-        s.logs = window.JamjarData.history || [];
+    .then((client) => {
+      api = client.api;
+      s.ready = true;
+      if (client.current.user !== undefined) setActor(client.current.user);
+      if (client.current.data) {
+        s.items = client.current.data.items || [];
+        s.logs = client.current.data.history || [];
+        s.loaded = true;
       }
       render();
     })
@@ -1536,7 +2035,7 @@ if (mc?.registerTool) {
           now = Date.now();
         s.revealId = id;
         if (PREVIEW)
-          local("add", {
+          local("added", {
             id,
             description: d,
             quantity,
@@ -1548,7 +2047,7 @@ if (mc?.registerTool) {
             listAddedAt: now,
           });
         else
-          await window.JamjarFirebase?.addItem({
+          await api?.addItem({
             id,
             description: d,
             quantity,
@@ -1572,7 +2071,8 @@ if (mc?.registerTool) {
         required: ["query"],
         additionalProperties: false,
       },
-      annotations: { readOnlyHint: true, untrustedContentHint: false },
+      // Descriptions are typed by either household member.
+      annotations: { readOnlyHint: true, untrustedContentHint: true },
       execute: (v) => {
         const q = String(v?.query || "")
           .trim()
