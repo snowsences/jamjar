@@ -1411,7 +1411,9 @@ strong {
 .list-main {
   view-transition-name: content;
 }
-.pantry-page-surface {
+/* Only its own layer while changing category. On a tab switch a layer
+   that only exists in the new state would be drawn over the tab bar. */
+html[data-vt="category"] .pantry-page-surface {
   view-transition-name: pantry-page;
 }
 ::view-transition-old(root),
@@ -1466,15 +1468,13 @@ html[data-vt] .clear-pull {
 ::view-transition-group(pantry-page) {
   animation-duration: 0s;
 }
-html[data-vt="tab"]::view-transition-old(content),
-html[data-vt="tab"]::view-transition-old(pantry-page) {
+html[data-vt="tab"]::view-transition-old(content) {
   animation: vt-out 140ms ease-in both;
 }
 html[data-vt="tab"]::view-transition-old(content) {
   translate: 0 var(--vt-old-y, 0px);
 }
-html[data-vt="tab"]::view-transition-new(content),
-html[data-vt="tab"]::view-transition-new(pantry-page) {
+html[data-vt="tab"]::view-transition-new(content) {
   animation: vt-in 360ms var(--spring) both;
 }
 html[data-vt="category"]::view-transition-old(content),
