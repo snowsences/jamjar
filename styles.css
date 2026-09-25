@@ -24,6 +24,15 @@
   --foreground: #f7fafb;
   --primary: #ffc44c;
   --border: #ffffff1b;
+  /* Damped springs; motion.js has the same curves for script animations. */
+  --spring: cubic-bezier(0.2, 0.9, 0.25, 1);
+  --bounce: cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+@supports (transition-timing-function: linear(0, 1)) {
+  :root {
+    --spring: linear(0, 0.0356 3.6%, 0.1179 7.1%, 0.2208 10.7%, 0.3285 14.3%, 0.4318 17.9%, 0.5261 21.4%, 0.6092 25%, 0.6807 28.6%, 0.7411 32.1%, 0.7915 35.7%, 0.833 39.3%, 0.8669 42.9%, 0.8943 46.4%, 0.9164 50%, 0.9341 53.6%, 0.9482 57.1%, 0.9594 60.7%, 0.9683 64.3%, 0.9752 67.9%, 0.9807 71.4%, 0.985 75%, 0.9884 78.6%, 0.991 82.1%, 0.993 85.7%, 0.9946 89.3%, 0.9958 92.9%, 0.9968 96.4%, 1);
+    --bounce: linear(0, 0.0528 3.6%, 0.1767 7.1%, 0.3311 10.7%, 0.489 14.3%, 0.6335 17.9%, 0.7559 21.4%, 0.8531 25%, 0.9258 28.6%, 0.9767 32.1%, 1.0095 35.7%, 1.0282 39.3%, 1.0368 42.9%, 1.0383 46.4%, 1.0355 50%, 1.0304 53.6%, 1.0243 57.1%, 1.0183 60.7%, 1.0129 64.3%, 1.0085 67.9%, 1.0049 71.4%, 1.0023 75%, 1.0006 78.6%, 0.9994 82.1%, 0.9988 85.7%, 0.9986 89.3%, 0.9985 92.9%, 0.9987 96.4%, 1);
+  }
 }
 * {
   box-sizing: border-box;
@@ -32,6 +41,36 @@ html,
 body {
   min-height: 100%;
   background: #17242d;
+  overscroll-behavior-y: none;
+}
+/* Behind the iOS status bar once content scrolls under it. */
+body:before {
+  content: "";
+  position: fixed;
+  z-index: 45;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: env(safe-area-inset-top);
+  background: #17242dcc;
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  opacity: 0;
+  transition: opacity 200ms;
+  pointer-events: none;
+}
+html.scrolled body:before {
+  opacity: 1;
+}
+.haptic-switch {
+  position: fixed;
+  top: 0;
+  left: -100px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
 }
 body {
   margin: 0;
@@ -93,8 +132,40 @@ strong {
   color: #17242d;
   font-weight: 500;
 }
+.btn {
+  position: relative;
+  overflow: hidden;
+  transition: scale 320ms var(--bounce);
+}
 .btn:hover {
   filter: brightness(1.05);
+}
+.btn:active:not(:disabled) {
+  scale: 0.97;
+  transition-duration: 80ms;
+}
+/* Android press ripple (motion.js); other platforms use the press states. */
+.ripple {
+  position: absolute;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.2);
+  pointer-events: none;
+  transform: scale(0);
+}
+.fab .ripple,
+.btn:not(.ghost) .ripple,
+.toast-undo .ripple {
+  background: rgb(0 0 0 / 0.12);
+}
+.tab-trigger,
+.settings-row,
+.category-choice,
+.pantry-category-tab,
+.pantry-to-groceries,
+.history-undo,
+.toast-undo,
+.screen-head button {
+  overflow: hidden;
 }
 .btn:disabled {
   opacity: 0.5;
@@ -217,6 +288,39 @@ strong {
   width: 20px;
   height: 20px;
 }
+/* Fills as the pull reaches the clear threshold. */
+.pull-ring {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+}
+.pull-ring svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-dasharray: 100.53;
+  stroke-dashoffset: calc(100.53 * (1 - var(--pull, 0)));
+}
+.clear-pull .pull-ring .icon {
+  width: 15px;
+  height: 15px;
+}
+.clear-pull.armed .pull-ring {
+  animation: ring-pop 360ms var(--bounce);
+}
+@keyframes ring-pop {
+  from {
+    transform: scale(1.2);
+  }
+}
 .swipe-wrap {
   position: relative;
   min-height: 64px;
@@ -261,11 +365,53 @@ strong {
 }
 .swipe-wrap.swiping-right .swipe-underlay.primary,
 .swipe-wrap.swiping-left .swipe-underlay.delete {
+  opacity: 0.55;
+}
+.swipe-wrap.armed.swiping-right .swipe-underlay.primary,
+.swipe-wrap.armed.swiping-left .swipe-underlay.delete {
   opacity: 1;
 }
 .swipe-underlay .icon {
   width: 22px;
   height: 22px;
+  transform: scale(0.7);
+  transition: transform 380ms var(--bounce);
+}
+.swipe-wrap.armed .swipe-underlay .icon {
+  transform: scale(1);
+}
+.row-ghost {
+  position: fixed;
+  z-index: 2;
+  margin: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.skeleton-row {
+  min-height: 64px;
+  padding: 16px 24px;
+  display: grid;
+  gap: 9px;
+  align-content: center;
+  border-bottom: 1px solid #ffffff08;
+}
+.skeleton-row span {
+  display: block;
+  width: calc(72% - var(--i) * 7%);
+  height: 14px;
+  border-radius: 7px;
+  background: linear-gradient(90deg, #ffffff0c 0%, #ffffff1c 50%, #ffffff0c 100%)
+    0 0 / 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+.skeleton-row span + span {
+  width: 26%;
+  height: 10px;
+}
+@keyframes shimmer {
+  to {
+    background-position: -200% 0;
+  }
 }
 .item-row {
   position: relative;
@@ -281,8 +427,9 @@ strong {
   background: linear-gradient(180deg, var(--band-top), var(--band-bottom));
   touch-action: pan-y;
   user-select: none;
+  overflow: hidden;
   transition:
-    transform 240ms cubic-bezier(0.2, 0.85, 0.2, 1),
+    transform 380ms var(--spring),
     opacity 180ms;
 }
 .pantry-row .item-row {
@@ -317,14 +464,25 @@ strong {
 .pantry-to-groceries:active {
   background: #00000026;
 }
+.pantry-to-groceries .icon {
+  transition: transform 380ms var(--bounce);
+}
+.pantry-to-groceries:active .icon {
+  transform: scale(0.84);
+  transition-duration: 80ms;
+}
 .item-row:after {
   content: "";
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.05);
+  background: rgba(0, 0, 0, 0.08);
   opacity: 0;
   pointer-events: none;
-  transition: opacity 50ms linear;
+  transition: opacity 160ms linear;
+}
+.item-row:active:after {
+  opacity: 1;
+  transition-duration: 40ms;
 }
 @media (hover: hover) {
   .item-row:hover:after {
@@ -479,6 +637,7 @@ strong {
   color: #fff;
 }
 .pantry-categories {
+  position: relative;
   display: flex;
   align-items: stretch;
   gap: 4px;
@@ -506,7 +665,28 @@ strong {
 }
 .pantry-category-tab.active {
   color: #fff;
-  border-bottom-color: #00ab6c;
+}
+.pantry-category-tab {
+  transition: color 200ms;
+}
+.pantry-category-tab:active {
+  background: #ffffff0a;
+}
+.category-indicator {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 0;
+  height: 3px;
+  border-radius: 3px 3px 0 0;
+  background: #00ab6c;
+  pointer-events: none;
+  transition:
+    transform 380ms var(--spring),
+    width 380ms var(--spring);
+}
+.category-indicator.tracking {
+  transition: none;
 }
 .category-selector {
   display: flex;
@@ -522,9 +702,19 @@ strong {
   color: #c2d0d7;
   font-weight: 500;
 }
+.category-choice {
+  transition:
+    background 200ms,
+    border-color 200ms,
+    scale 320ms var(--bounce);
+}
+.category-choice:active {
+  scale: 0.95;
+  transition-duration: 80ms;
+}
 .category-choice.active {
-  border-color: #00ab6c;
-  background: #007dc2;
+  border-color: var(--chip, #00ab6c);
+  background: var(--chip, #007dc2);
   color: #fff;
 }
 .pantry-page-surface {
@@ -583,6 +773,18 @@ strong {
   background: #ffc44c;
   color: #17242d;
   box-shadow: 0 10px 32px #07111688;
+  overflow: hidden;
+  transition:
+    scale 380ms var(--bounce),
+    translate 420ms var(--spring);
+}
+.fab:active {
+  scale: 0.9;
+  transition-duration: 90ms;
+}
+/* Material moves the button up out of the snackbar's way. */
+[data-platform="android"].toast-shown .fab {
+  translate: 0 calc(-1 * var(--toast-space, 0px));
 }
 .fab .icon {
   width: 28px;
@@ -618,6 +820,11 @@ strong {
 .tab-trigger .icon {
   width: 23px;
   height: 23px;
+  transition: transform 380ms var(--bounce);
+}
+.tab-trigger:active .icon {
+  transform: scale(0.84);
+  transition-duration: 90ms;
 }
 .tab-trigger.active {
   color: #ffc44c;
@@ -684,6 +891,14 @@ strong {
   color: #fff;
   font-size: 18px;
 }
+.settings-row {
+  position: relative;
+  transition: background 160ms;
+}
+.settings-row:not(.static):active {
+  background: #28414d;
+  transition-duration: 40ms;
+}
 .settings-row.static {
   cursor: default;
   background: #1d303a;
@@ -695,11 +910,23 @@ strong {
   color: #ffbdc5;
   background: #553b43;
 }
+/* History sits over the app so the page behind can show during its push
+   and edge-swipe back. */
+.history-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: #17242d;
+  touch-action: pan-y;
+  box-shadow: -16px 0 40px #0007;
+}
 .history-screen {
   width: min(800px, 100%);
-  min-height: 100dvh;
+  min-height: 100%;
   margin: 0 auto;
-  padding-bottom: 24px;
+  padding-bottom: calc(24px + env(safe-area-inset-bottom));
 }
 .screen-head {
   height: 86px;
@@ -714,7 +941,11 @@ strong {
   backdrop-filter: blur(18px);
   z-index: 10;
 }
+.screen-head button:active {
+  background: #ffffff14;
+}
 .screen-head button {
+  position: relative;
   width: 44px;
   height: 44px;
   display: grid;
@@ -768,6 +999,9 @@ strong {
   color: #fff;
   font-weight: 500;
 }
+.history-undo {
+  position: relative;
+}
 .history-undo:hover {
   background: #355867;
 }
@@ -786,7 +1020,8 @@ strong {
   min-height: 100dvh;
   display: grid;
   place-items: center;
-  padding: 32px 20px;
+  padding: calc(32px + env(safe-area-inset-top)) 20px
+    calc(32px + env(safe-area-inset-bottom));
   background: #14232c;
 }
 .gate-card {
@@ -836,6 +1071,29 @@ strong {
   display: grid;
   place-items: center;
   padding: 24px;
+  animation: backdrop-in 240ms ease backwards;
+}
+.dialog {
+  animation: dialog-in 280ms var(--spring) backwards;
+}
+@keyframes backdrop-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+}
+@keyframes sheet-in {
+  from {
+    transform: translateY(100%);
+  }
+}
+.sheet-grabber {
+  display: none;
 }
 .dialog {
   width: min(100%, 520px);
@@ -864,12 +1122,6 @@ strong {
   display: grid;
   gap: 8px;
   font-weight: 500;
-}
-.form-stack label > span {
-  color: #aebfc8;
-  font-size: 14px;
-  font-weight: 400;
-  margin-left: 5px;
 }
 .form-stack input {
   height: 50px;
@@ -945,7 +1197,16 @@ strong {
   color: #17242d;
   box-shadow: 0 10px 32px #07111688;
   pointer-events: auto;
-  animation: toast-in 180ms cubic-bezier(0.2, 0.85, 0.2, 1);
+  touch-action: pan-y;
+  animation: toast-in 420ms var(--spring);
+}
+/* Android: a full-width Material snackbar. */
+[data-platform="android"] .toast-host {
+  right: max(16px, calc((100vw - 800px) / 2 + 16px));
+}
+[data-platform="android"] .toast {
+  width: 100%;
+  border-radius: 6px;
 }
 .toast span {
   flex: 1 1 auto;
@@ -956,6 +1217,7 @@ strong {
   white-space: nowrap;
 }
 .toast-undo {
+  position: relative;
   flex: 0 0 auto;
   min-height: 40px;
   padding: 0 14px;
@@ -971,7 +1233,7 @@ strong {
 @keyframes toast-in {
   from {
     opacity: 0;
-    transform: translateY(12px);
+    transform: translateY(20px) scale(0.96);
   }
 }
 @media (min-width: 681px) {
@@ -1045,22 +1307,84 @@ strong {
     padding: 0;
     place-items: stretch;
   }
+  /* The editor is a sheet: a gap at the top, a grabber, drag down to close. */
   .dialog-backdrop.editor .dialog {
     position: fixed;
-    top: var(--visual-viewport-top, 0px);
+    top: calc(var(--visual-viewport-top, 0px) + env(safe-area-inset-top) + 10px);
     right: 0;
     bottom: auto;
     left: 0;
     max-width: none;
     width: 100%;
-    height: var(--visual-viewport-height, 100dvh);
+    height: calc(
+      var(--visual-viewport-height, 100dvh) - env(safe-area-inset-top) - 10px
+    );
     border: 0;
-    border-radius: 0;
-    padding: calc(26px + env(safe-area-inset-top)) 24px
-      calc(22px + env(safe-area-inset-bottom));
+    border-radius: 16px 16px 0 0;
+    padding: 34px 24px calc(22px + env(safe-area-inset-bottom));
     display: flex;
     flex-direction: column;
     overflow-y: auto;
+    animation: sheet-in 460ms var(--spring) backwards;
+  }
+  .dialog-backdrop.editor .sheet-grabber {
+    display: block;
+    position: absolute;
+    top: 8px;
+    left: 50%;
+    width: 36px;
+    height: 5px;
+    border-radius: 3px;
+    background: #ffffff40;
+    transform: translateX(-50%);
+  }
+  .dialog-backdrop.editor .close-x {
+    top: 22px;
+  }
+  /* iOS confirmations are action sheets. */
+  [data-platform="ios"] .dialog-backdrop.confirm {
+    place-items: end stretch;
+    padding: 0 8px calc(8px + env(safe-area-inset-bottom));
+  }
+  [data-platform="ios"] .dialog-backdrop.confirm .dialog {
+    width: 100%;
+    padding: 22px 16px 14px;
+    text-align: center;
+    animation: sheet-in 460ms var(--spring) backwards;
+  }
+  [data-platform="ios"] .confirm-dialog h2 {
+    font-size: 20px;
+    letter-spacing: -0.02em;
+  }
+  [data-platform="ios"] .confirm-dialog .dialog-actions {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+  [data-platform="ios"] .confirm-dialog .btn {
+    min-height: 52px;
+    font-size: 17px;
+  }
+  /* Edge to edge: the first row's colour runs up behind the status bar. */
+  .app-shell:is(.tab-grocery, .tab-shopping)
+    .item-list
+    > .swipe-wrap:first-child
+    .item-row {
+    padding-top: calc(12px + env(safe-area-inset-top));
+  }
+  .app-shell:is(.tab-grocery, .tab-shopping)
+    .item-list
+    > .swipe-wrap:first-child
+    .swipe-underlay {
+    padding-top: env(safe-area-inset-top);
+  }
+  .app-shell:is(.tab-grocery, .tab-shopping) .item-list > .empty-state:first-child {
+    padding-top: calc(38px + env(safe-area-inset-top));
+  }
+  .app-shell:is(.tab-grocery, .tab-shopping) .item-list > .skeleton-row:first-child {
+    padding-top: calc(16px + env(safe-area-inset-top));
+  }
+  .app-shell.tab-pantry .pantry-controls {
+    padding-top: env(safe-area-inset-top);
   }
   .dialog-backdrop.editor .form-stack {
     flex: 0 0 auto;
@@ -1081,6 +1405,63 @@ strong {
   .screen-head {
     height: calc(72px + env(safe-area-inset-top));
     padding-top: env(safe-area-inset-top);
+  }
+}
+/* Tab and category changes, where view transitions are supported. */
+.list-main {
+  view-transition-name: content;
+}
+.pantry-page-surface {
+  view-transition-name: pantry-page;
+}
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+}
+::view-transition-group(content),
+::view-transition-group(pantry-page) {
+  animation-duration: 0s;
+}
+html[data-vt="tab"]::view-transition-old(content),
+html[data-vt="tab"]::view-transition-old(pantry-page) {
+  animation: vt-out 140ms ease-in both;
+}
+html[data-vt="tab"]::view-transition-new(content),
+html[data-vt="tab"]::view-transition-new(pantry-page) {
+  animation: vt-in 360ms var(--spring) both;
+}
+html[data-vt="category"]::view-transition-old(content),
+html[data-vt="category"]::view-transition-new(content) {
+  animation: none;
+}
+html[data-vt="category"]::view-transition-old(pantry-page) {
+  animation: vt-page-out 220ms ease-in both;
+}
+html[data-vt="category"]::view-transition-new(pantry-page) {
+  animation: vt-page-in 400ms var(--spring) both;
+}
+@keyframes vt-out {
+  to {
+    opacity: 0;
+    transform: translateX(calc(var(--vt-dir, 1) * -20px));
+  }
+}
+@keyframes vt-in {
+  from {
+    opacity: 0;
+    transform: translateX(calc(var(--vt-dir, 1) * 28px));
+  }
+}
+@keyframes vt-page-out {
+  to {
+    opacity: 0;
+    transform: translateX(calc(var(--vt-dir, 1) * -30%));
+  }
+}
+@keyframes vt-page-in {
+  from {
+    opacity: 0;
+    transform: translateX(calc(var(--vt-dir, 1) * 30%));
   }
 }
 @media (prefers-reduced-motion: reduce) {

@@ -1,12 +1,24 @@
+import {
+  platform,
+  reducedMotion,
+  phone,
+  SPRING,
+  EASE_IN,
+  haptic,
+  velocityTracker,
+  ripple,
+} from "./motion.js";
 const root = document.getElementById("app");
 const PREVIEW = ["terminal.local", "localhost", "127.0.0.1"].includes(
   location.hostname,
 );
 const SIGNED_IN_KEY = "jamjar:signed-in";
+let wasSignedIn = false;
 // A signed-in launch needs Firestore straight away, so fetch it alongside the
 // rest of the code instead of after firebase-client.js has loaded.
 try {
-  if (!PREVIEW && localStorage.getItem(SIGNED_IN_KEY)) {
+  wasSignedIn = !PREVIEW && Boolean(localStorage.getItem(SIGNED_IN_KEY));
+  if (wasSignedIn) {
     const preload = document.createElement("link");
     preload.rel = "modulepreload";
     preload.href = "./vendor/firebase-firestore.js";
@@ -107,6 +119,7 @@ const s = {
     : null,
   authKnown: PREVIEW,
   ready: PREVIEW,
+  loaded: PREVIEW,
   history: false,
   query: "",
   pantryCategory: "All",
@@ -290,7 +303,7 @@ function local(action, item, patch = {}) {
 function gate() {
   patch(`<main class="gate"><div class="gate-card">${appIcon("gate-icon")}<h1>Jamjar</h1>${!s.authKnown ? `<p>${s.ready ? "Sign in with Google to share your grocery list and pantry." : "Opening your lists…"}</p>` : ""}<button class="btn google-button" id="signin" ${!s.ready ? "disabled" : ""}>Sign in with Google</button></div></main>`);
 }
-function renderHistory() {
+function historyMarkup() {
   const sorted = [...s.logs].sort((a, b) => b.createdAt - a.createdAt);
   const h = sorted
     .map(
@@ -323,7 +336,7 @@ function renderHistory() {
       },
     )
     .join("");
-  patch(`<main class="history-screen"><header class="screen-head"><button id="back" aria-label="Back">${I("back")}</button><h1>History Log</h1></header><ol class="history-list">${h || '<li class="empty-state">Actions will appear here as you use Jamjar.</li>'}</ol></main>`);
+  return `<div class="history-layer" id="historyLayer"><main class="history-screen"><header class="screen-head"><button id="back" aria-label="Back">${I("back")}</button><h1>History Log</h1></header><ol class="history-list">${h || '<li class="empty-state">Actions will appear here as you use Jamjar.</li>'}</ol></main></div>`;
 }
 async function undoFromHistory(button) {
   const log = s.logs.find((entry) => entry.id === button.dataset.undoId);
@@ -383,8 +396,15 @@ const pantryEmptyText = () =>
     : s.pantryCategory === "All"
       ? "Your pantry is empty."
       : "No items in this category.";
+// Placeholder rows shown until the first sync arrives.
+const skeleton = () =>
+  Array.from(
+    { length: 6 },
+    (_, i) =>
+      `<li class="skeleton-row" aria-hidden="true" style="--i:${i}"><span></span><span></span></li>`,
+  ).join("");
 function pantryPage(items, emptyText) {
-  return `<div class="pantry-page"><ul class="item-list">${pantryRows(items)}${items.length ? "" : `<li class="empty-state">${emptyText}</li>`}</ul></div>`;
+  return `<div class="pantry-page"><ul class="item-list">${s.loaded ? `${pantryRows(items)}${items.length ? "" : `<li class="empty-state">${emptyText}</li>`}` : skeleton()}</ul></div>`;
 }
 let suggestionCache = { items: null, logs: null, html: "" };
 // Rebuilt only when the data changes, not on every render of the editor.
@@ -414,18 +434,18 @@ function editor() {
     : "What do you have?";
   const categorySelector = hasQuantity
     ? ""
-    : `<div class="category-selector" role="group" aria-label="Category">${ITEM_CATEGORIES.map((category) => `<button type="button" class="category-choice${s.itemCategory === category ? " active" : ""}" data-item-category="${e(category)}" aria-pressed="${s.itemCategory === category}">${e(category)}</button>`).join("")}</div>`;
+    : `<div class="category-selector" role="group" aria-label="Category">${ITEM_CATEGORIES.map((category) => `<button type="button" class="category-choice${s.itemCategory === category ? " active" : ""}" style="--chip:${PANTRY_PALETTES[category][1]}" data-item-category="${e(category)}" aria-pressed="${s.itemCategory === category}">${e(category)}</button>`).join("")}</div>`;
   const actions = `<div class="dialog-actions"><button class="btn ghost" id="cancel">Cancel</button><button class="btn" id="save" ${s.saving ? "disabled" : ""}>${s.saving ? "Saving…" : "Save"}</button>${x ? `<button class="btn ghost delete-button" id="delAsk">${I("trash")}Delete</button>` : ""}</div>`;
-  return `<div class="dialog-backdrop editor"><section class="dialog dialog-wrap" role="dialog" aria-modal="true"><button class="close-x" id="x" aria-label="Close editor">×</button><h2>${x ? "Edit item" : `Add to ${listLabel(editorList)}`}</h2><div class="form-stack"><label>Description<input id="desc" maxlength="120" list="suggestions" value="${e(s.desc)}" placeholder="${descriptionPlaceholder}"></label><datalist id="suggestions">${suggestions()}</datalist>${categorySelector}${hasQuantity ? `<label>Quantity <span>Optional</span><input id="qty" maxlength="40" value="${e(s.qty)}" placeholder="2, 3 cans, 1 lb…"></label>` : ""}${s.error ? `<p class="form-error" role="alert">${e(s.error)}</p>` : ""}</div>${actions}</section></div>`;
+  return `<div class="dialog-backdrop editor"><section class="dialog dialog-wrap" role="dialog" aria-modal="true"><div class="sheet-grabber" aria-hidden="true"></div><button class="close-x" id="x" aria-label="Close editor">×</button><h2>${x ? "Edit item" : `Add to ${listLabel(editorList)}`}</h2><div class="form-stack"><label>Description<input id="desc" maxlength="120" list="suggestions" value="${e(s.desc)}" placeholder="${descriptionPlaceholder}"></label><datalist id="suggestions">${suggestions()}</datalist>${categorySelector}${hasQuantity ? `<label>Quantity<input id="qty" maxlength="40" value="${e(s.qty)}" placeholder="2, 3 cans, 1 lb…"></label>` : ""}${s.error ? `<p class="form-error" role="alert">${e(s.error)}</p>` : ""}</div>${actions}</section></div>`;
 }
 function confirm() {
   if (s.clearList) {
     const n = listDone(s.clearList).length;
-    return `<div class="dialog-backdrop"><section class="dialog confirm-dialog"><h2>Clear completed items?</h2><p>This removes all ${n} completed ${n === 1 ? "item" : "items"} from ${e(listLabel(s.clearList))}. The action can be undone from History.</p><div class="dialog-actions"><button class="btn ghost" id="clearNo">Cancel</button><button class="btn" id="clearYes">Clear completed</button></div></section></div>`;
+    return `<div class="dialog-backdrop confirm"><section class="dialog confirm-dialog"><h2>Clear completed items?</h2><p>This removes all ${n} completed ${n === 1 ? "item" : "items"} from ${e(listLabel(s.clearList))}. The action can be undone from History.</p><div class="dialog-actions"><button class="btn ghost" id="clearNo">Cancel</button><button class="btn" id="clearYes">Clear completed</button></div></section></div>`;
   }
   if (s.del) {
     const x = s.items.find((i) => i.id === s.editId);
-    return `<div class="dialog-backdrop"><section class="dialog confirm-dialog"><h2>Delete “${e(x?.description || "")}”?</h2><p>This removes it from Jamjar. The action will remain in History.</p><div class="dialog-actions"><button class="btn ghost" id="delNo">Cancel</button><button class="btn destructive" id="delYes">Delete</button></div></section></div>`;
+    return `<div class="dialog-backdrop confirm"><section class="dialog confirm-dialog"><h2>Delete “${e(x?.description || "")}”?</h2><p>This removes it from Jamjar. The action will remain in History.</p><div class="dialog-actions"><button class="btn ghost" id="delNo">Cancel</button><button class="btn destructive" id="delYes">Delete</button></div></section></div>`;
   }
   return "";
 }
@@ -448,17 +468,19 @@ function app() {
   const listMarkup = (list, emptyText) => {
     const activeItems = listActive(list),
       completedItems = listDone(list);
-    return `<section id="${list}-section"><div class="list-content"><ul class="item-list">${activeItems.map((x, i) => row(x, i, activeItems.length)).join("")}${activeItems.length ? "" : `<li class="empty-state">${emptyText}</li>`}${completedItems.map((x, i) => row(x, i, completedItems.length)).join("")}</ul>${completedItems.length ? `<div class="clear-pull" id="clearPull" aria-hidden="true">${I("trash")}<span>Pull up to clear completed</span></div>` : ""}</div></section>`;
+    if (!s.loaded)
+      return `<section id="${list}-section"><div class="list-content"><ul class="item-list">${skeleton()}</ul></div></section>`;
+    return `<section id="${list}-section"><div class="list-content"><ul class="item-list">${activeItems.map((x, i) => row(x, i, activeItems.length)).join("")}${activeItems.length ? "" : `<li class="empty-state">${emptyText}</li>`}${completedItems.map((x, i) => row(x, i, completedItems.length)).join("")}</ul>${completedItems.length ? `<div class="clear-pull" id="clearPull" aria-hidden="true"><span class="pull-ring"><svg viewBox="0 0 36 36" aria-hidden="true"><circle cx="18" cy="18" r="16"/></svg>${I("trash")}</span><span class="pull-label">Pull up to clear completed</span></div>` : ""}</div></section>`;
   };
   const sections = {
     grocery: () => listMarkup("grocery", "Your grocery list is empty."),
     pantry: () =>
-      `<section id="pantry-section"><div class="list-content"><div class="pantry-controls"><div class="search-field">${I("search")}<label class="sr-only" for="search">Search Pantry</label><input id="search" value="${e(s.query)}" placeholder="Search"><button type="button" class="search-clear" id="clearSearch" aria-label="Clear search" ${s.query ? "" : "hidden"}>${I("x")}</button></div><nav class="pantry-categories" aria-label="Pantry categories">${categoryTabs()}</nav></div><div class="pantry-page-surface">${pantryPage(pantry(), pantryEmptyText())}</div></div></section>`,
+      `<section id="pantry-section"><div class="list-content"><div class="pantry-controls"><div class="search-field">${I("search")}<label class="sr-only" for="search">Search Pantry</label><input id="search" value="${e(s.query)}" placeholder="Search"><button type="button" class="search-clear" id="clearSearch" aria-label="Clear search" ${s.query ? "" : "hidden"}>${I("x")}</button></div><nav class="pantry-categories" aria-label="Pantry categories">${categoryTabs()}<span class="category-indicator" data-live-style aria-hidden="true"></span></nav></div><div class="pantry-page-surface">${pantryPage(pantry(), pantryEmptyText())}</div></div></section>`,
     shopping: () => listMarkup("shopping", "Your shopping list is empty."),
     settings: () =>
       `<section><div class="settings-page"><button class="settings-row" id="hist"><span class="setting-icon">${I("history")}</span><span><strong>History Log</strong><small>See every change and who made it</small></span><span>›</span></button><div class="settings-row static"><span class="avatar">${e(initial)}</span><span><strong>${e(u.displayName || u.email || "")}</strong><small>${e(u.email || "")}</small></span></div>${s.install ? `<button class="settings-row" id="install"><span class="setting-icon">${I("package")}</span><span><strong>Install Jamjar</strong><small>Add it to this device</small></span><span>›</span></button>` : ""}<button class="settings-row danger-row" id="signout"><span class="setting-icon">${I("logout")}</span><span><strong>Sign out</strong><small>Keep shared data in Jamjar</small></span></button></div></section>`,
   };
-  patch(`<div class="app-shell tab-${s.tab}${s.oneHanded ? " one-handed" : ""}">
+  patch(`<div class="app-shell tab-${s.tab}${s.oneHanded ? " one-handed" : ""}" ${s.history ? "inert" : ""}>
     <header class="topbar"><div class="brand">${appIcon("brand-icon", "./icon-96.png")}<span>Jamjar</span></div><span class="sync-status">${e(s.status)}</span></header>
     <main class="list-main">
       ${sections[s.tab]()}
@@ -470,19 +492,25 @@ function app() {
       <button class="tab-trigger ${s.tab === "shopping" ? "active" : ""}" data-tab="shopping">${I("shopping")}<span>Shopping</span>${shopping ? `<b>${shopping}</b>` : ""}</button>
       <button class="tab-trigger ${s.tab === "settings" ? "active" : ""}" data-tab="settings">${I("settings")}<span>Settings</span></button>
     </nav>
-  </div>${editor()}${confirm()}`);
+  </div>${editor()}${confirm()}${s.history ? historyMarkup() : ""}`);
   swipes();
   pantryCategorySwipes();
   pullToClear();
 }
+// Rows are only animated in and out when the same list is still showing.
+const layoutContext = () =>
+  `${s.tab}|${s.tab === "pantry" ? `${s.pantryCategory}|${s.query}` : ""}|${s.history}`;
 function captureLayout() {
   const positions = new Map(),
-    states = new Map();
+    states = new Map(),
+    rows = new Map();
   visibleRows().forEach((row) => {
-    positions.set(row.dataset.id, row.getBoundingClientRect().top);
+    const rect = row.getBoundingClientRect();
+    positions.set(row.dataset.id, rect.top);
     states.set(row.dataset.id, row.classList.contains("is-done"));
+    rows.set(row.dataset.id, { row, rect });
   });
-  return { positions, states };
+  return { positions, states, rows, context: layoutContext() };
 }
 function visibleRows() {
   return [...document.querySelectorAll(".swipe-wrap[data-id]")].filter(
@@ -490,17 +518,47 @@ function visibleRows() {
       !row.closest(".pantry-page-adjacent"),
   );
 }
+// A removed row leaves a copy behind that collapses while the rows below
+// slide up into its place.
+function collapseGhost({ row, rect }) {
+  if (rect.bottom < 0 || rect.top > innerHeight) return;
+  const ghost = row.cloneNode(true);
+  ghost.classList.add("row-ghost");
+  ghost.removeAttribute("data-id");
+  Object.assign(ghost.style, {
+    top: `${rect.top}px`,
+    left: `${rect.left}px`,
+    width: `${rect.width}px`,
+    height: `${rect.height}px`,
+  });
+  document.body.append(ghost);
+  ghost
+    .animate(
+      [
+        { height: `${rect.height}px`, opacity: 1 },
+        { height: "0px", opacity: 0 },
+      ],
+      { duration: 300, easing: SPRING, fill: "forwards" },
+    )
+    .finished.then(
+      () => ghost.remove(),
+      () => ghost.remove(),
+    );
+}
 function animateLayout(previous) {
-  if (
-    !previous.positions.size ||
-    matchMedia("(prefers-reduced-motion: reduce)").matches
-  )
-    return;
+  if (!previous.positions.size || reducedMotion()) return;
+  const sameList = previous.context === layoutContext();
   // Read every position before starting any animation so layout runs once.
   const rows = visibleRows().map((row) => [
     row,
     row.getBoundingClientRect().top,
   ]);
+  if (sameList) {
+    const present = new Set(rows.map(([row]) => row.dataset.id));
+    previous.rows.forEach((entry, id) => {
+      if (!present.has(id)) collapseGhost(entry);
+    });
+  }
   rows.forEach(([row, newTop]) => {
     const id = row.dataset.id,
       wasDone = previous.states.get(id),
@@ -518,13 +576,21 @@ function animateLayout(previous) {
       );
     if (!row.animate) return;
     const oldTop = previous.positions.get(id);
+    if (oldTop === undefined && sameList)
+      return void row.animate(
+        [
+          { opacity: 0, transform: "scale(0.96)" },
+          { opacity: 1, transform: "none" },
+        ],
+        { duration: 360, easing: SPRING },
+      );
     if (oldTop !== undefined && Math.abs(oldTop - newTop) > 0.5)
       row.animate(
         [
           { transform: `translateY(${oldTop - newTop}px)` },
           { transform: "translateY(0)" },
         ],
-        { duration: 300, easing: "cubic-bezier(0.37, 0, 0.63, 1)" },
+        { duration: 380, easing: SPRING },
       );
   });
 }
@@ -627,15 +693,26 @@ function pantryCategorySwipes() {
         : `translate3d(${pageDirection * 100}%,0,0)`;
     });
     currentPage.style.transform = `translate3d(${displayedX}px,0,0)`;
+    indicatorTracking(true);
+    positionIndicator(
+      nextPage ? PANTRY_CATEGORIES[categoryIndex() + nextDirection] : null,
+      Math.min(Math.abs(displayedX) / width, 1),
+    );
   };
   const flushDragFrame = () => {
     if (!dragFrame) return;
     cancelAnimationFrame(dragFrame);
     paintDrag(pendingX);
   };
+  const indicatorTracking = (on) =>
+    surface.parentElement
+      .querySelector(".category-indicator")
+      ?.classList.toggle("tracking", on);
   const clearDrag = () => {
     if (dragFrame) cancelAnimationFrame(dragFrame);
     dragFrame = 0;
+    indicatorTracking(false);
+    positionIndicator();
     currentPage.style.transform = "";
     currentPage.classList.remove("dragging-page");
     adjacentPages.forEach((page, pageDirection) => {
@@ -663,12 +740,8 @@ function pantryCategorySwipes() {
       reduced = matchMedia("(prefers-reduced-motion: reduce)").matches,
       currentTarget = commit ? -direction * width : 0,
       adjacentTarget = commit ? 0 : direction * width,
-      duration = reduced ? 0 : commit ? 260 : 220,
-      options = {
-        duration,
-        easing: "cubic-bezier(0.37, 0, 0.63, 1)",
-        fill: "forwards",
-      },
+      duration = reduced ? 0 : commit ? 380 : 320,
+      options = { duration, easing: SPRING, fill: "forwards" },
       animations = [
         currentPage.animate(
           [
@@ -678,6 +751,13 @@ function pantryCategorySwipes() {
           options,
         ),
       ];
+    // The underline finishes its move alongside the pages.
+    indicatorTracking(false);
+    positionIndicator(
+      commit ? PANTRY_CATEGORIES[categoryIndex() + direction] : null,
+      commit ? 1 : 0,
+    );
+    if (commit) haptic(8);
     if (adjacentPage)
       animations.push(
         adjacentPage.animate(
@@ -805,15 +885,18 @@ function patch(html) {
   patchChildren(root, next.content);
 }
 function patchChildren(from, to) {
-  // Swipe pages and animation clones aren't part of the markup.
+  // Swipe pages aren't part of the markup; ripples are left to finish.
+  const kept = (node) => node?.nodeType === 1 && node.dataset.transient === "keep";
   [...from.children].forEach(
-    (child) => child.hasAttribute("data-transient") && child.remove(),
+    (child) =>
+      child.hasAttribute("data-transient") && !kept(child) && child.remove(),
   );
   const keyed = new Map();
   for (const child of from.children)
     if (child.dataset.id) keyed.set(child.dataset.id, child);
   let cursor = from.firstChild;
   for (const node of [...to.childNodes]) {
+    while (kept(cursor)) cursor = cursor.nextSibling;
     const key = node.nodeType === 1 ? node.dataset.id : undefined;
     let match = null;
     if (key) match = keyed.get(key) || null;
@@ -834,7 +917,7 @@ function patchChildren(from, to) {
   }
   while (cursor) {
     const nextSibling = cursor.nextSibling;
-    cursor.remove();
+    if (!kept(cursor)) cursor.remove();
     cursor = nextSibling;
   }
 }
@@ -858,8 +941,11 @@ function patchNode(from, to) {
   )
     from.value = to.getAttribute("value") ?? "";
   if (from.isEqualNode(to)) return;
+  // data-live-style elements are positioned from script, so keep their style.
+  const live = from.hasAttribute("data-live-style");
   for (const { name } of [...from.attributes])
-    if (!to.hasAttribute(name)) from.removeAttribute(name);
+    if (!to.hasAttribute(name) && !(live && name === "style"))
+      from.removeAttribute(name);
   for (const { name, value } of to.attributes)
     if (from.getAttribute(name) !== value) from.setAttribute(name, value);
   patchChildren(from, to);
@@ -870,12 +956,144 @@ function render({ animate = true } = {}) {
     renderFrame = 0;
   }
   const previous = animate ? captureLayout() : { positions: new Map() };
-  if (!s.authKnown && !PREVIEW) return gate();
-  if (!s.actor && !PREVIEW) return gate();
-  if (s.history) return renderHistory();
+  // Someone who was signed in last time sees the lists loading, not sign-in.
+  if (!PREVIEW && (s.authKnown ? !s.actor : !wasSignedIn)) return gate();
   app();
   animateLayout(previous);
   revealPendingItem();
+  positionIndicator();
+  updateChrome();
+}
+// Screen changes run inside a view transition where the browser has one;
+// CSS picks the animation from data-vt and --vt-dir.
+function transition(type, direction, update) {
+  if (!document.startViewTransition || reducedMotion()) return update();
+  const html = document.documentElement;
+  html.dataset.vt = type;
+  html.style.setProperty("--vt-dir", String(direction));
+  const clear = () => delete html.dataset.vt;
+  document.startViewTransition(update).finished.then(clear, clear);
+}
+// The pantry category underline, optionally part-way to a neighbour while a
+// page is being dragged.
+function positionIndicator(to = null, progress = 0) {
+  const nav = document.querySelector(".pantry-categories"),
+    bar = nav?.querySelector(".category-indicator");
+  if (!bar) return;
+  const tab = (category) =>
+      nav.querySelector(`[data-pantry-category="${CSS.escape(category)}"]`),
+    a = tab(s.pantryCategory),
+    b = (to && tab(to)) || a;
+  if (!a) return;
+  const x = a.offsetLeft + (b.offsetLeft - a.offsetLeft) * progress,
+    width = a.offsetWidth + (b.offsetWidth - a.offsetWidth) * progress,
+    placed = Boolean(bar.style.width);
+  if (!placed) bar.style.transition = "none";
+  bar.style.transform = `translateX(${x}px)`;
+  bar.style.width = `${width}px`;
+  if (!placed) {
+    bar.offsetWidth;
+    bar.style.transition = "";
+  }
+}
+// Status bar tint follows the row under it; the iOS status bar scrim shows
+// once the page has scrolled.
+const themeColor = document.querySelector('meta[name="theme-color"]');
+let chromeFrame = 0;
+function updateChrome() {
+  chromeFrame = 0;
+  const top = document.elementFromPoint(innerWidth / 2, 1),
+    band = top?.closest?.(".item-row")?.style.getPropertyValue("--band-top"),
+    color = band || "#17242d";
+  if (themeColor && themeColor.content !== color) themeColor.content = color;
+  document.documentElement.classList.toggle("scrolled", scrollY > 2);
+}
+addEventListener(
+  "scroll",
+  () => {
+    if (!chromeFrame) chromeFrame = requestAnimationFrame(updateChrome);
+  },
+  { passive: true },
+);
+// Editor and confirmations: sheets on phones (the editor always, confirms on
+// iOS), scale-and-fade dialogs elsewhere. Entry is CSS; exit is played here
+// before the state that removes them is cleared.
+const isSheet = (backdrop) =>
+  phone() && (backdrop.classList.contains("editor") || platform === "ios");
+function dismissDialogs(selector = ".dialog-backdrop") {
+  const backdrops = [...document.querySelectorAll(selector)];
+  if (!backdrops.length || reducedMotion()) {
+    sheetBackground(false, 0);
+    return Promise.resolve();
+  }
+  return Promise.all(
+    backdrops.map((backdrop) => {
+      backdrop.style.pointerEvents = "none";
+      const dialog = backdrop.querySelector(".dialog"),
+        sheet = isSheet(backdrop),
+        from = getComputedStyle(dialog).transform,
+        animations = [
+          backdrop.animate([{ opacity: 1 }, { opacity: 0 }], {
+            duration: 240,
+            easing: "ease",
+            fill: "forwards",
+          }),
+          dialog.animate(
+            sheet
+              ? [
+                  { transform: from === "none" ? "translateY(0)" : from },
+                  { transform: "translateY(100%)" },
+                ]
+              : [
+                  { opacity: 1, transform: "none" },
+                  { opacity: 0, transform: "scale(0.96)" },
+                ],
+            { duration: sheet ? 260 : 150, easing: EASE_IN, fill: "forwards" },
+          ),
+        ];
+      if (backdrop.classList.contains("editor"))
+        animations.push(...sheetBackground(false));
+      return Promise.all(animations.map((a) => a.finished)).catch(() => {});
+    }),
+  );
+}
+// iOS sheets push the page behind them back and round its corners.
+let sheetBackgroundAnimation = null;
+function sheetBackground(opening, duration = opening ? 460 : 260) {
+  const main = document.querySelector(".list-main");
+  if (!main || platform !== "ios" || !phone()) return [];
+  if (!opening && !sheetBackgroundAnimation) return [];
+  const top = -main.getBoundingClientRect().top,
+    bottom = main.offsetHeight - top - innerHeight,
+    frame = (scale, radius) => ({
+      transform: `scale(${scale})`,
+      clipPath: `inset(${top}px 0 ${bottom}px 0 round ${radius}px)`,
+    });
+  main.style.transformOrigin = `50% ${top + innerHeight / 2}px`;
+  const animation = main.animate(
+    opening
+      ? [frame(1, 0), frame(0.93, 14)]
+      : [frame(0.93, 14), frame(1, 0)],
+    {
+      duration: reducedMotion() ? 0 : duration,
+      easing: opening ? SPRING : EASE_IN,
+      fill: "forwards",
+    },
+  );
+  if (opening) {
+    sheetBackgroundAnimation?.cancel();
+    sheetBackgroundAnimation = animation;
+  } else {
+    const previous = sheetBackgroundAnimation;
+    sheetBackgroundAnimation = null;
+    previous?.cancel();
+    const done = () => {
+      animation.cancel();
+      main.style.transformOrigin = "";
+    };
+    animation.finished.then(done, done);
+  }
+  return [animation];
 }
 function open(x = null) {
   s.editId = x?.id || null;
@@ -890,15 +1108,138 @@ function open(x = null) {
   s.editor = true;
   window.history.pushState({ editor: true }, "");
   render();
+  sheetBackground(true);
   setTimeout(() => document.getElementById("desc")?.focus(), 0);
 }
-function close(fromPop = false) {
+let closing = false;
+async function close(fromPop = false) {
+  if (!s.editor || closing) return;
+  closing = true;
+  if (!fromPop && window.history.state?.editor) window.history.back();
+  await dismissDialogs();
+  closing = false;
   s.editor = false;
+  s.del = false;
   s.editId = null;
   s.error = "";
   s.saving = false;
-  if (!fromPop && window.history.state?.editor) window.history.back();
   render();
+}
+// Dragging the top of the editor sheet down dismisses it.
+function dragSheet(event) {
+  const dialog = event.target.closest(".editor .dialog");
+  if (!dialog || !phone() || event.button !== 0) return;
+  if (event.clientY - dialog.getBoundingClientRect().top > 72) return;
+  if (event.target.closest("button, input")) return;
+  const backdrop = dialog.parentElement,
+    startY = event.clientY,
+    tracker = velocityTracker();
+  let offset = 0;
+  const move = (q) => {
+      const dy = q.clientY - startY;
+      offset = dy > 0 ? dy : dy * 0.2;
+      tracker.add(0, dy);
+      dialog.style.transform = `translateY(${offset}px)`;
+      backdrop.style.backgroundColor = `rgba(6, 16, 22, ${0.72 * (1 - Math.min(Math.max(offset, 0) / dialog.offsetHeight, 1))})`;
+    },
+    up = () => {
+      removeEventListener("pointermove", move);
+      removeEventListener("pointerup", up);
+      removeEventListener("pointercancel", up);
+      if (offset > 110 || tracker.velocity().y > FLICK_SPEED) return void close();
+      backdrop.style.backgroundColor = "";
+      const from = dialog.style.transform || "translateY(0)";
+      dialog.style.transform = "";
+      dialog.animate([{ transform: from }, { transform: "translateY(0)" }], {
+        duration: 380,
+        easing: SPRING,
+      });
+    };
+  addEventListener("pointermove", move);
+  addEventListener("pointerup", up);
+  addEventListener("pointercancel", up);
+}
+// History slides over Settings: an iOS push with the page behind shifting
+// and dimming, or Material's shared-axis slide and fade elsewhere.
+let historyAnimations = [],
+  historyClosing = false,
+  historyDraggedOut = false;
+function historyFrames(p) {
+  if (platform === "ios")
+    return [
+      { transform: `translateX(${(1 - p) * 100}%)` },
+      {
+        transform: `translateX(${-25 * p}%)`,
+        filter: `brightness(${1 - 0.35 * p})`,
+      },
+    ];
+  return [
+    { opacity: p, transform: `translateX(${(1 - p) * 30}px)` },
+    { opacity: 1 - p, transform: `translateX(${-30 * p}px)` },
+  ];
+}
+function animateHistory(from, to, duration = 440, easing = SPRING) {
+  const layer = document.getElementById("historyLayer"),
+    shell = document.querySelector(".app-shell");
+  if (!layer || !shell) return Promise.resolve();
+  const [layerFrom, shellFrom] = historyFrames(from),
+    [layerTo, shellTo] = historyFrames(to),
+    options = { duration: reducedMotion() ? 0 : duration, easing, fill: "forwards" },
+    next = [
+      layer.animate([layerFrom, layerTo], options),
+      shell.animate([shellFrom, shellTo], options),
+    ];
+  historyAnimations.forEach((animation) => animation.cancel());
+  historyAnimations = next;
+  return Promise.all(next.map((animation) => animation.finished)).catch(
+    () => {},
+  );
+}
+function openHistory() {
+  s.history = true;
+  window.history.pushState({ history: true }, "");
+  render();
+  animateHistory(0, 1);
+}
+async function closeHistory() {
+  if (historyClosing) return;
+  historyClosing = true;
+  if (!historyDraggedOut) await animateHistory(1, 0, 340);
+  historyDraggedOut = false;
+  s.history = false;
+  render();
+  historyAnimations.forEach((animation) => animation.cancel());
+  historyAnimations = [];
+  historyClosing = false;
+}
+// iOS home-screen apps have no system back swipe, so History gets its own
+// from the left edge.
+function edgeSwipeBack(event) {
+  if (!s.history || platform !== "ios" || event.clientX > 28) return;
+  const layer = document.getElementById("historyLayer");
+  if (!layer?.contains(event.target)) return;
+  const startX = event.clientX,
+    tracker = velocityTracker();
+  let progress = 1;
+  const move = (q) => {
+      const dx = Math.max(q.clientX - startX, 0);
+      tracker.add(dx);
+      progress = 1 - Math.min(dx / innerWidth, 1);
+      animateHistory(progress, progress, 0);
+    },
+    up = async () => {
+      removeEventListener("pointermove", move);
+      removeEventListener("pointerup", up);
+      removeEventListener("pointercancel", up);
+      if (progress < 0.65 || tracker.velocity().x > 0.5) {
+        await animateHistory(progress, 0, 300);
+        historyDraggedOut = true;
+        window.history.back();
+      } else animateHistory(progress, 1, 300);
+    };
+  addEventListener("pointermove", move);
+  addEventListener("pointerup", up);
+  addEventListener("pointercancel", up);
 }
 async function save() {
   if (s.saving) return;
@@ -1048,6 +1389,12 @@ async function move(x, to) {
 // Swipe-deletes skip the confirmation; the toast offers Undo instead.
 async function remove(x = s.items.find((i) => i.id === s.editId)) {
   if (!x) return;
+  if (s.editor || s.del) {
+    closing = true;
+    if (window.history.state?.editor) window.history.back();
+    await dismissDialogs();
+    closing = false;
+  }
   let log = null,
     failed = false;
   try {
@@ -1065,7 +1412,6 @@ async function remove(x = s.items.find((i) => i.id === s.editId)) {
   s.editor = false;
   s.editId = null;
   s.saving = false;
-  if (window.history.state?.editor) window.history.back();
   render();
   if (failed) toast("Couldn’t delete that item. Try again.");
   else toast(`Deleted ${quoted(x)}`, log);
@@ -1074,6 +1420,7 @@ async function clearAll() {
   const source = s.clearList,
     items = listDone(source),
     label = `${items.length} completed ${items.length === 1 ? "item" : "items"}`;
+  await dismissDialogs(".dialog-backdrop.confirm");
   let log = null,
     failed = false;
   try {
@@ -1103,15 +1450,78 @@ toastHost.setAttribute("role", "status");
 toastHost.setAttribute("aria-live", "polite");
 document.body.append(toastHost);
 let toastTimer = 0;
-function hideToast() {
+// On Android the + button rises above the full-width snackbar.
+function toastSpace(el) {
+  const html = document.documentElement;
+  html.classList.toggle("toast-shown", Boolean(el));
+  if (el) html.style.setProperty("--toast-space", `${el.offsetHeight + 12}px`);
+}
+function hideToast({ animate = true, to = "translateY(24px)" } = {}) {
   clearTimeout(toastTimer);
   toastTimer = 0;
-  toastHost.replaceChildren();
+  const el = toastHost.firstElementChild;
+  toastSpace(null);
+  if (!el) return;
+  if (!animate || reducedMotion()) return toastHost.replaceChildren();
+  el.style.pointerEvents = "none";
+  const from = getComputedStyle(el).transform;
+  el.animate(
+    [
+      { opacity: 1, transform: from === "none" ? "none" : from },
+      { opacity: 0, transform: to },
+    ],
+    { duration: 200, easing: EASE_IN, fill: "forwards" },
+  ).finished.then(
+    () => el.isConnected && el.remove(),
+    () => {},
+  );
+}
+// Toasts can be swiped away sideways.
+function swipeToast(el, restart) {
+  el.addEventListener("pointerdown", (down) => {
+    if (down.target.closest("button") || down.button !== 0) return;
+    const tracker = velocityTracker();
+    let dx = 0;
+    clearTimeout(toastTimer);
+    el.setPointerCapture(down.pointerId);
+    const move = (q) => {
+        dx = q.clientX - down.clientX;
+        tracker.add(dx);
+        el.style.transform = `translateX(${dx}px)`;
+        el.style.opacity = String(1 - Math.min(Math.abs(dx) / 240, 0.6));
+      },
+      up = () => {
+        el.removeEventListener("pointermove", move);
+        el.removeEventListener("pointerup", up);
+        el.removeEventListener("pointercancel", up);
+        const speed = tracker.velocity().x;
+        if (Math.abs(dx) > 80 || Math.abs(speed) > 0.5)
+          return hideToast({
+            to: `translateX(${Math.sign(dx || speed) * 120}%)`,
+          });
+        const from = el.style.transform;
+        el.style.transform = "";
+        el.style.opacity = "";
+        el.animate([{ transform: from }, { transform: "none" }], {
+          duration: 380,
+          easing: SPRING,
+        });
+        restart();
+      };
+    el.addEventListener("pointermove", move);
+    el.addEventListener("pointerup", up);
+    el.addEventListener("pointercancel", up);
+  });
 }
 function toast(message, log = null) {
   clearTimeout(toastTimer);
   toastHost.innerHTML = `<div class="toast"><span>${e(message)}</span>${log ? '<button type="button" class="toast-undo">Undo</button>' : ""}</div>`;
-  toastHost.querySelector(".toast-undo")?.addEventListener("click", async (event) => {
+  const el = toastHost.firstElementChild,
+    restart = () =>
+      (toastTimer = setTimeout(hideToast, log ? 6000 : 4000));
+  toastSpace(el);
+  swipeToast(el, restart);
+  el.querySelector(".toast-undo")?.addEventListener("click", async (event) => {
     const button = event.currentTarget;
     clearTimeout(toastTimer);
     button.disabled = true;
@@ -1124,7 +1534,7 @@ function toast(message, log = null) {
       toast(undoError(error));
     }
   });
-  toastTimer = setTimeout(hideToast, log ? 6000 : 4000);
+  restart();
 }
 const undoError = (error) =>
   ["jamjar/conflict", "unavailable"].includes(error?.code)
@@ -1164,16 +1574,24 @@ function undoLocal(log) {
 // touched rather than holding on to the item it was first drawn with.
 const boundRows = new WeakSet();
 const itemFor = (row) => s.items.find((v) => v.id === row.dataset.id);
+const SWIPE_THRESHOLD = 64,
+  SWIPE_REST = 112,
+  FLICK_SPEED = 0.6;
+// Past the delete threshold the row drags with resistance.
+const rubberBand = (value) =>
+  value < -SWIPE_REST ? -SWIPE_REST + (value + SWIPE_REST) * 0.35 : value;
 function swipes() {
   document.querySelectorAll(".swipe-wrap").forEach((w) => {
     const b = w.querySelector(".item-row");
     if (!b || boundRows.has(b)) return;
     boundRows.add(b);
+    const tracker = velocityTracker();
     let start = 0,
       startY = 0,
       last = 0,
       pending = 0,
       paintFrame = 0,
+      stage = "",
       drag = false,
       horizontal = false,
       vertical = false;
@@ -1184,14 +1602,29 @@ function swipes() {
       };
       return;
     }
+    const stageFor = (x, value) =>
+      x.list === "grocery" && value >= innerWidth * 0.5
+        ? "transfer"
+        : value >= SWIPE_THRESHOLD
+          ? "primary"
+          : value <= -SWIPE_THRESHOLD
+            ? "delete"
+            : "";
+    const reset = () => {
+      if (paintFrame) cancelAnimationFrame(paintFrame);
+      paintFrame = 0;
+      stage = "";
+      b.classList.remove("dragging");
+      w.classList.remove("swiping-right", "swiping-left", "armed");
+    };
     b.onpointerdown = (q) => {
       if (q.button !== 0) return;
       start = q.clientX;
       startY = q.clientY;
       last = 0;
       pending = 0;
-      if (paintFrame) cancelAnimationFrame(paintFrame);
-      paintFrame = 0;
+      reset();
+      tracker.reset();
       drag = false;
       horizontal = false;
       vertical = false;
@@ -1202,8 +1635,7 @@ function swipes() {
       const x = itemFor(w);
       if (!x) return;
       const raw = q.clientX - start,
-        y = q.clientY - startY,
-        next = raw;
+        y = q.clientY - startY;
       if (!horizontal && Math.abs(y) > 8 && Math.abs(y) > Math.abs(raw)) {
         vertical = true;
         drag = true;
@@ -1213,62 +1645,70 @@ function swipes() {
         horizontal = true;
       if (!horizontal) return;
       q.preventDefault();
-      last = next;
-      pending = next;
+      tracker.add(raw);
+      last = raw;
+      pending = rubberBand(raw);
       drag = true;
       b.classList.add("dragging");
+      // A tick each time the release action changes, like native swipe actions.
+      const nextStage = stageFor(x, raw);
+      if (nextStage !== stage) {
+        if (nextStage) haptic(8);
+        stage = nextStage;
+      }
       if (!paintFrame)
         paintFrame = requestAnimationFrame(() => {
           paintFrame = 0;
           const value = pending,
-            transfer = x.list === "grocery" && value >= innerWidth * 0.5,
+            transfer = stage === "transfer",
             primary = w.querySelector(".swipe-underlay.primary"),
             l = primary?.querySelector(".under-label"),
             ii = primary?.querySelector(".under-icon");
           b.style.transform = `translate3d(${value}px,0,0)`;
           w.classList.toggle("swiping-right", value > 12);
           w.classList.toggle("swiping-left", value < -12);
+          w.classList.toggle("armed", Boolean(stage));
           primary?.classList.toggle("is-transfer", transfer);
-          if (l)
-            l.textContent = transfer
-              ? "Move to Pantry"
-              : x.completed
-                ? "Restore"
-                : "Bought";
-          if (ii) ii.innerHTML = I(transfer ? "archive" : "check");
+          const label = transfer ? "Move to Pantry" : x.completed ? "Restore" : "Bought";
+          if (l && l.textContent !== label) l.textContent = label;
+          if (ii && ii.dataset.icon !== String(transfer)) {
+            ii.dataset.icon = String(transfer);
+            ii.innerHTML = I(transfer ? "archive" : "check");
+          }
         });
     };
     b.onpointerup = (q) => {
-      if (paintFrame) cancelAnimationFrame(paintFrame);
-      paintFrame = 0;
       if (b.hasPointerCapture(q.pointerId))
         b.releasePointerCapture(q.pointerId);
-      b.classList.remove("dragging");
-      w.classList.remove("swiping-right", "swiping-left");
+      const armed = stage;
+      reset();
       const x = itemFor(w);
-      if (!x) return (b.style.transform = "");
-      if (x.list === "grocery" && last >= innerWidth * 0.5) {
-        b.classList.add("completing");
-        navigator.vibrate?.(12);
-        return setTimeout(() => move(x, "pantry"), 180);
-      }
-      if ((x.list === "grocery" || x.list === "shopping") && last >= 64) {
-        b.classList.add("completing");
-        navigator.vibrate?.(12);
-        return setTimeout(() => toggle(x), 180);
-      }
-      if ((x.list === "grocery" || x.list === "shopping") && last <= -64) {
-        b.classList.add("moving-left");
-        navigator.vibrate?.(12);
-        return setTimeout(() => remove(x), 180);
-      }
-      b.style.transform = "";
+      if (!x || !horizontal) return (b.style.transform = "");
+      // A quick flick counts even when it's short of the threshold.
+      const speed = tracker.velocity().x,
+        flick = Math.abs(speed) > FLICK_SPEED && Math.abs(last) > 24,
+        action =
+          armed ||
+          (flick && Math.sign(speed) === Math.sign(last)
+            ? speed > 0
+              ? "primary"
+              : "delete"
+            : "");
+      if (!action) return (b.style.transform = "");
+      if (!armed) haptic(12);
+      b.classList.add(action === "delete" ? "moving-left" : "completing");
+      setTimeout(
+        () =>
+          action === "transfer"
+            ? move(x, "pantry")
+            : action === "primary"
+              ? toggle(x)
+              : remove(x),
+        180,
+      );
     };
     b.onpointercancel = () => {
-      if (paintFrame) cancelAnimationFrame(paintFrame);
-      paintFrame = 0;
-      b.classList.remove("dragging");
-      w.classList.remove("swiping-right", "swiping-left");
+      reset();
       b.style.transform = "";
     };
     b.onclick = () => {
@@ -1302,9 +1742,11 @@ function pullToClear() {
   const show = (value) => {
     amount = Math.max(0, Math.min(value, 96));
     indicator.style.transform = `translateY(${64 - Math.min(amount, 64)}px)`;
+    indicator.style.setProperty("--pull", String(Math.min(amount / threshold, 1)));
     const armed = amount >= threshold;
+    if (armed && !indicator.classList.contains("armed")) haptic(10);
     indicator.classList.toggle("armed", armed);
-    indicator.querySelector("span").textContent = armed
+    indicator.querySelector(".pull-label").textContent = armed
       ? "Release to clear completed"
       : "Pull up to clear completed";
   };
@@ -1366,6 +1808,7 @@ function pullToClear() {
   section.addEventListener("pointerup", finish, { signal });
   section.addEventListener("pointercancel", finish, { signal });
 }
+const TABS = ["grocery", "pantry", "shopping", "settings"];
 function selectTab(next) {
   if (innerWidth <= 680 && next === s.tab && next !== "settings") {
     s.oneHanded = !s.oneHanded;
@@ -1375,22 +1818,21 @@ function selectTab(next) {
     return scrollTabTop();
   }
   if (next === s.tab) return;
-  const mobile = innerWidth <= 680;
-  s.oneHanded = false;
-  s.query = "";
-  s.tab = next;
-  render();
-  if (mobile) scrollTabTop();
+  const mobile = innerWidth <= 680,
+    direction = Math.sign(TABS.indexOf(next) - TABS.indexOf(s.tab));
+  transition("tab", direction, () => {
+    s.oneHanded = false;
+    s.query = "";
+    s.tab = next;
+    render();
+    if (mobile) scrollTo(0, 0);
+  });
 }
 const clicks = {
   signin: () => api?.signIn(),
   back: () => history.back(),
   add: () => open(),
-  hist: () => {
-    s.history = true;
-    history.pushState({ history: true }, "");
-    render();
-  },
+  hist: () => openHistory(),
   install: () => installPrompt?.prompt(),
   signout: () => api?.signOut(),
   clearSearch: () => {
@@ -1407,12 +1849,14 @@ const clicks = {
     s.del = true;
     render();
   },
-  clearNo: () => {
+  clearNo: async () => {
+    await dismissDialogs(".dialog-backdrop.confirm");
     s.clearList = "";
     render();
   },
   clearYes: () => clearAll(),
-  delNo: () => {
+  delNo: async () => {
+    await dismissDialogs(".dialog-backdrop.confirm");
     s.del = false;
     render();
   },
@@ -1427,9 +1871,15 @@ root.addEventListener("click", (event) => {
   if (tab) return selectTab(tab);
   if (pantryCategory) {
     if (pantryCategory === s.pantryCategory) return;
-    s.pantryCategory = pantryCategory;
-    s.query = "";
-    return render();
+    const direction = Math.sign(
+      PANTRY_CATEGORIES.indexOf(pantryCategory) -
+        PANTRY_CATEGORIES.indexOf(s.pantryCategory),
+    );
+    return transition("category", direction, () => {
+      s.pantryCategory = pantryCategory;
+      s.query = "";
+      render();
+    });
   }
   if (itemCategory) {
     s.itemCategory = itemCategory;
@@ -1448,6 +1898,13 @@ root.addEventListener("click", (event) => {
   if (undoId) return void undoFromHistory(button);
   clicks[button.id]?.();
 });
+root.addEventListener("pointerdown", (event) => {
+  ripple(event);
+  dragSheet(event);
+  edgeSwipeBack(event);
+});
+// iOS only applies :active press styles when a touch listener exists.
+addEventListener("touchstart", () => {}, { passive: true });
 root.addEventListener("input", (event) => {
   const { id, value } = event.target;
   if (id === "search") {
@@ -1464,11 +1921,8 @@ addEventListener("beforeinstallprompt", (q) => {
   render();
 });
 addEventListener("popstate", () => {
-  if (s.history) {
-    s.history = false;
-    return render();
-  }
-  if (s.editor) return close(true);
+  if (s.history) return void closeHistory();
+  if (s.editor) return void close(true);
 });
 addEventListener("keydown", (event) => {
   if (event.key !== "Escape" || !s.editor || s.del) return;
@@ -1500,18 +1954,26 @@ if (!PREVIEW) {
       nextStatus = q.detail.fromCache
         ? "Offline · changes will sync"
         : "Up to date",
-      statusChanged = s.status !== nextStatus;
+      statusChanged = s.status !== nextStatus,
+      firstLoad = !s.loaded;
+    s.loaded = true;
     s.items = nextItems;
     s.logs = nextLogs;
     if (s.undoPendingId && s.logs.some((log) => log.targetHistoryId === s.undoPendingId))
       s.undoPendingId = null;
     s.status = nextStatus;
-    if (itemsChanged || statusChanged || (logsChanged && (s.history || s.editor)))
+    if (
+      firstLoad ||
+      itemsChanged ||
+      statusChanged ||
+      (logsChanged && (s.history || s.editor))
+    )
       scheduleRender();
   });
   addEventListener("jamjar:write-error", (q) => toast(q.detail));
   addEventListener("jamjar:error", (q) => {
     s.status = q.detail || "Sync unavailable";
+    s.loaded = true;
     render();
   });
   import("./firebase-client.js")
@@ -1522,6 +1984,7 @@ if (!PREVIEW) {
       if (client.current.data) {
         s.items = client.current.data.items || [];
         s.logs = client.current.data.history || [];
+        s.loaded = true;
       }
       render();
     })
