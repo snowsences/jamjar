@@ -109,16 +109,18 @@ const commitItems = async (make, log) => {
   });
   return entry;
 };
+// Read by app.js if the module finished loading after these events fired.
+export const current = { user: undefined, data: null };
 function emit() {
-  window.JamjarData = { items, history, fromCache };
-  fire("data", window.JamjarData);
+  current.data = { items, history, fromCache };
+  fire("data", current.data);
 }
 
 onAuthStateChanged(auth, async (user) => {
-  const current = ++session;
+  const run = ++session;
   stops.forEach((stop) => stop());
   stops = [];
-  window.JamjarCurrentUser = user
+  current.user = user
     ? {
         uid: user.uid,
         email: user.email || "",
@@ -126,10 +128,10 @@ onAuthStateChanged(auth, async (user) => {
         photoURL: user.photoURL,
       }
     : null;
-  fire("auth", window.JamjarCurrentUser);
+  fire("auth", current.user);
   if (!user) return;
   const { fs, itemsRef, historyRef } = await ready;
-  if (current !== session) return;
+  if (run !== session) return;
   stops.push(
     fs.onSnapshot(
       itemsRef,
@@ -169,7 +171,40 @@ onAuthStateChanged(auth, async (user) => {
   );
 });
 
-window.JamjarFirebase = {
+// Checks the cached copy of each item still matches the action being undone,
+// then writes the reverse. Used offline, where a transaction can't run; the
+// batch syncs when the connection returns.
+const undoLocally = (before, after, beforeIds, afterById, ids, item, log) => {
+  ids.forEach((id) => {
+    const expected = afterById.get(id),
+      found = items.find((candidate) => candidate.id === id),
+      now = found ? itemSnapshot(found) : null;
+    if (expected ? !now || !sameItem(now, expected) : now)
+      throw Object.assign(Error("That changed since, so it can’t be undone."), {
+        code: "jamjar/conflict",
+      });
+  });
+  return commitItems(
+    (batch, ref) => {
+      after.forEach((entry) => {
+        if (!beforeIds.has(entry.id)) batch.delete(ref(entry.id));
+      });
+      before.forEach((entry) => batch.set(ref(entry.id), entry));
+    },
+    {
+      action: "undid",
+      item,
+      extra: {
+        beforeItems: after,
+        afterItems: before,
+        targetAction: log.action || "changed",
+        targetHistoryId: log.id,
+      },
+    },
+  );
+};
+
+export const api = {
   signIn: () => signInWithPopup(auth, new GoogleAuthProvider()),
   signOut: () => signOut(auth),
   addItem: (input) => {
@@ -254,8 +289,8 @@ window.JamjarFirebase = {
       },
     );
   },
-  // Runs as a transaction so an undo never overwrites a change someone made
-  // after the original action. Needs a connection.
+  // Online, runs as a transaction so an undo never overwrites a change someone
+  // made after the original action. Offline, checks against the local cache.
   undoAction: async (log) => {
     if (!auth.currentUser) throw Error("Sign in to save.");
     const { fs, db, itemsRef, historyRef } = await ready;
@@ -269,8 +304,10 @@ window.JamjarFirebase = {
         quantity: "",
         list: log.fromList || "",
       };
+    const offline = () =>
+      undoLocally(before, after, beforeIds, afterById, ids, item, log);
+    if (!navigator.onLine || fromCache) return offline();
     try {
-      if (!navigator.onLine) throw Object.assign(Error(), { code: "unavailable" });
       // Transactions read from the server, so let the action being undone
       // (possibly still queued locally) land first.
       await Promise.race([
@@ -316,12 +353,8 @@ window.JamjarFirebase = {
           Error("That changed since, so it can’t be undone."),
           { code: error.code },
         );
-      if (!navigator.onLine || error?.code === "unavailable")
-        throw Object.assign(Error("Undo needs a connection."), {
-          code: "unavailable",
-        });
+      if (!navigator.onLine || error?.code === "unavailable") return offline();
       throw error;
     }
   },
 };
-fire("firebase-ready");
