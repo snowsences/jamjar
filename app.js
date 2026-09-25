@@ -470,7 +470,7 @@ function app() {
       completedItems = listDone(list);
     if (!s.loaded)
       return `<section id="${list}-section"><div class="list-content"><ul class="item-list">${skeleton()}</ul></div></section>`;
-    return `<section id="${list}-section"><div class="list-content"><ul class="item-list">${activeItems.map((x, i) => row(x, i, activeItems.length)).join("")}${activeItems.length ? "" : `<li class="empty-state">${emptyText}</li>`}${completedItems.map((x, i) => row(x, i, completedItems.length)).join("")}</ul>${completedItems.length ? `<div class="clear-pull" id="clearPull" aria-hidden="true"><span class="pull-ring"><svg viewBox="0 0 36 36" aria-hidden="true"><circle cx="18" cy="18" r="16"/></svg>${I("trash")}</span><span class="pull-label">Pull up to clear completed</span></div>` : ""}</div></section>`;
+    return `<section id="${list}-section"><div class="list-content"><ul class="item-list">${activeItems.map((x, i) => row(x, i, activeItems.length)).join("")}${activeItems.length ? "" : `<li class="empty-state">${emptyText}</li>`}${completedItems.map((x, i) => row(x, i, completedItems.length)).join("")}</ul>${completedItems.length ? `<div class="clear-pull" id="clearPull" aria-hidden="true"><span class="pull-ring"><svg class="ring" viewBox="0 0 36 36" aria-hidden="true"><circle cx="18" cy="18" r="16"/></svg>${I("trash")}</span><span class="pull-label">Pull up to clear completed</span></div>` : ""}</div></section>`;
   };
   const sections = {
     grocery: () => listMarkup("grocery", "Your grocery list is empty."),
@@ -968,11 +968,19 @@ function render({ animate = true } = {}) {
 // CSS picks the animation from data-vt and --vt-dir.
 function transition(type, direction, update) {
   if (!document.startViewTransition || reducedMotion()) return update();
-  const html = document.documentElement;
+  const html = document.documentElement,
+    top = () => document.querySelector(".list-main")?.getBoundingClientRect().top ?? 0,
+    before = top();
   html.dataset.vt = type;
   html.style.setProperty("--vt-dir", String(direction));
   const clear = () => delete html.dataset.vt;
-  document.startViewTransition(update).finished.then(clear, clear);
+  document
+    .startViewTransition(() => {
+      update();
+      // The update may scroll to the top; keep the outgoing list where it was.
+      html.style.setProperty("--vt-old-y", `${before - top()}px`);
+    })
+    .finished.then(clear, clear);
 }
 // The pantry category underline, optionally part-way to a neighbour while a
 // page is being dragged.
