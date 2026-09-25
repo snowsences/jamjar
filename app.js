@@ -498,6 +498,9 @@ function app() {
   pullToClear();
 }
 // Rows are only animated in and out when the same list is still showing.
+// renderedContext is the list on screen, since state has already changed by
+// the time the next render captures the layout.
+let renderedContext = "";
 const layoutContext = () =>
   `${s.tab}|${s.tab === "pantry" ? `${s.pantryCategory}|${s.query}` : ""}|${s.history}`;
 function captureLayout() {
@@ -510,7 +513,7 @@ function captureLayout() {
     states.set(row.dataset.id, row.classList.contains("is-done"));
     rows.set(row.dataset.id, { row, rect });
   });
-  return { positions, states, rows, context: layoutContext() };
+  return { positions, states, rows, context: renderedContext };
 }
 function visibleRows() {
   return [...document.querySelectorAll(".swipe-wrap[data-id]")].filter(
@@ -740,8 +743,13 @@ function pantryCategorySwipes() {
       reduced = matchMedia("(prefers-reduced-motion: reduce)").matches,
       currentTarget = commit ? -direction * width : 0,
       adjacentTarget = commit ? 0 : direction * width,
-      duration = reduced ? 0 : commit ? 380 : 320,
-      options = { duration, easing: SPRING, fill: "forwards" },
+      duration = reduced ? 0 : commit ? 280 : 260,
+      // A short-tailed ease-out: slower tails left a sliver of the old page.
+      options = {
+        duration,
+        easing: "cubic-bezier(0.33, 1, 0.68, 1)",
+        fill: "forwards",
+      },
       animations = [
         currentPage.animate(
           [
@@ -959,6 +967,7 @@ function render({ animate = true } = {}) {
   // Someone who was signed in last time sees the lists loading, not sign-in.
   if (!PREVIEW && (s.authKnown ? !s.actor : !wasSignedIn)) return gate();
   app();
+  renderedContext = layoutContext();
   animateLayout(previous);
   revealPendingItem();
   positionIndicator();
