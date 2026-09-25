@@ -296,7 +296,7 @@ strong {
   display: grid;
   place-items: center;
 }
-.pull-ring svg {
+.pull-ring .ring {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -1418,6 +1418,50 @@ strong {
 ::view-transition-new(root) {
   animation: none;
 }
+/* Fixed controls get their own layers so the list snapshot (and the
+   scrolled root) can't cover or drop them mid-transition. */
+.bottom-tabs {
+  view-transition-name: tab-bar;
+}
+.fab {
+  view-transition-name: fab;
+}
+.toast-host {
+  view-transition-name: toast;
+}
+::view-transition-group(tab-bar),
+::view-transition-group(fab),
+::view-transition-group(toast),
+::view-transition-new(tab-bar),
+::view-transition-new(toast) {
+  animation: none;
+}
+::view-transition-old(tab-bar),
+::view-transition-old(toast) {
+  display: none;
+}
+::view-transition-old(fab) {
+  animation: vt-fade-out 120ms ease-in both;
+}
+::view-transition-new(fab) {
+  animation: none;
+}
+::view-transition-new(fab):only-child {
+  animation: vt-fade-in 240ms ease-out both;
+}
+html[data-vt] .clear-pull {
+  visibility: hidden;
+}
+@keyframes vt-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes vt-fade-in {
+  from {
+    opacity: 0;
+  }
+}
 ::view-transition-group(content),
 ::view-transition-group(pantry-page) {
   animation-duration: 0s;
@@ -1425,6 +1469,9 @@ strong {
 html[data-vt="tab"]::view-transition-old(content),
 html[data-vt="tab"]::view-transition-old(pantry-page) {
   animation: vt-out 140ms ease-in both;
+}
+html[data-vt="tab"]::view-transition-old(content) {
+  translate: 0 var(--vt-old-y, 0px);
 }
 html[data-vt="tab"]::view-transition-new(content),
 html[data-vt="tab"]::view-transition-new(pantry-page) {
