@@ -515,8 +515,8 @@ function app() {
     <main class="list-main">
       ${sections[s.tab]()}
     </main>
-    ${s.tab !== "settings" ? `<button class="fab" id="add">${I("plus")}</button>` : ""}
-    <nav class="bottom-tabs">
+    <button class="fab" id="add" data-id="fab" ${s.tab === "settings" ? "hidden" : ""}>${I("plus")}</button>
+    <nav class="bottom-tabs" data-id="bottom-tabs">
       <button class="tab-trigger ${s.tab === "grocery" ? "active" : ""}" data-tab="grocery">${tabIcon("grocery", s.tab === "grocery")}<span>Groceries</span>${groceries ? `<b>${groceries}</b>` : ""}</button>
       <button class="tab-trigger ${s.tab === "pantry" ? "active" : ""}" data-tab="pantry">${tabIcon("pantry", s.tab === "pantry")}<span>Pantry</span></button>
       <button class="tab-trigger ${s.tab === "shopping" ? "active" : ""}" data-tab="shopping">${tabIcon("shopping", s.tab === "shopping")}<span>Shopping</span>${shopping ? `<b>${shopping}</b>` : ""}</button>
