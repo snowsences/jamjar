@@ -62,7 +62,7 @@ body:after {
     radial-gradient(circle at 6px 0, transparent 0 5.9px, #000 6px) bottom left / 6px 6px no-repeat,
     radial-gradient(circle at 0 0, transparent 0 5.9px, #000 6px) bottom right / 6px 6px no-repeat;
 }
-/* Behind the iOS status bar once content scrolls under it. */
+/* Keep the installed app status bar black with white system icons. */
 body:before {
   content: "";
   position: fixed;
@@ -71,11 +71,8 @@ body:before {
   left: 0;
   right: 0;
   height: env(safe-area-inset-top);
-  background: #17242dcc;
-  -webkit-backdrop-filter: blur(16px);
-  backdrop-filter: blur(16px);
-  opacity: 0;
-  transition: opacity 200ms;
+  background: #000;
+  opacity: 1;
   pointer-events: none;
 }
 html.scrolled body:before {
