@@ -40,8 +40,27 @@
 html,
 body {
   min-height: 100%;
-  background: #17242d;
+  background: #000;
   overscroll-behavior-y: none;
+}
+#app {
+  min-height: 100dvh;
+  overflow: hidden;
+  border-radius: 6px;
+  background: #17242d;
+}
+/* Keep the viewport corners visibly black even above fixed app layers. */
+body:after {
+  content: "";
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 6px 6px, transparent 0 5.9px, #000 6px) top left / 6px 6px no-repeat,
+    radial-gradient(circle at 0 6px, transparent 0 5.9px, #000 6px) top right / 6px 6px no-repeat,
+    radial-gradient(circle at 6px 0, transparent 0 5.9px, #000 6px) bottom left / 6px 6px no-repeat,
+    radial-gradient(circle at 0 0, transparent 0 5.9px, #000 6px) bottom right / 6px 6px no-repeat;
 }
 /* Behind the iOS status bar once content scrolls under it. */
 body:before {
